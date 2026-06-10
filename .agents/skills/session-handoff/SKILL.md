@@ -9,7 +9,7 @@ State on disk beats memory in context. The harness checks the handoff for you.
 
 ## Steps
 
-1. Run `python3 .agents/agents.py handoff`. It shows a live checklist:
+1. Run `./agents.sh handoff`. It shows a live checklist:
    verify status, progress entry, feature state, commit, push.
 2. Clear every `[..]` item it lists (each one names the exact command).
 3. Rerun `handoff` until it reports clean. Never hand off a dirty working
@@ -20,6 +20,6 @@ State on disk beats memory in context. The harness checks the handoff for you.
 
 ## Quality bar
 
-Next agent must answer from `agents.py init` output + files alone: what
+Next agent must answer from `./agents.sh init` output + files alone: what
 works, what's broken, what's next, what to not touch. If conversation context
 contains a fact needed for that, put it in the log entry now.

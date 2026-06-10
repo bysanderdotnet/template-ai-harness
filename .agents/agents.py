@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """agents.py — the agent harness. One CLI guides the whole workflow.
 
+Do not read or change this file for normal project work. Use the root wrapper
+help function instead: ./agents.sh --help
+
 Subcommands (each has --help with details and examples):
 
     setup     guided first-time project setup, one step at a time
@@ -28,7 +31,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 
-SCRIPT = "python3 .agents/agents.py"
+SCRIPT = "./agents.sh"
 
 
 def find_root():
@@ -278,7 +281,7 @@ only what you cannot infer (purpose, planned stack on an empty repo).""",
 
     ("commands", "Register project commands", f"""\
 Find the real commands (package.json scripts, Makefile, pyproject, CI) and
-register them — never edit agents.py itself:
+register them — never edit .agents/agents.py itself:
   {SCRIPT} cmd set lint "npm run lint" --verify
   {SCRIPT} cmd set test "npm test" --verify        # --verify = definition of done, cheap/fast first
   {SCRIPT} cmd set deps "npm ci" --init            # --init = session-start smoke check
@@ -878,7 +881,7 @@ def cmd_run(args):
 
 def build_parser():
     p = argparse.ArgumentParser(
-        prog="agents.py",
+        prog="./agents.sh",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Agent harness — one CLI guides the whole workflow.",
         epilog=f"""\

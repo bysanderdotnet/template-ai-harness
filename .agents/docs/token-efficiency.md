@@ -7,7 +7,7 @@ Tokens cost money + context. Filler words carry zero information.
 
 | Context | Style |
 |---|---|
-| Progress log entries (`agents.py log`), handoff notes, feature titles/notes | Caveman: max terse |
+| Progress log entries (`./agents.sh log`), handoff notes, feature titles/notes | Caveman: max terse |
 | Chat replies to user | Lean but readable. Full sentences for conclusions |
 | Code, comments, identifiers, public docs, commit messages | Normal. NEVER caveman |
 | Error reports | Facts first, full command + output excerpt |
