@@ -16,19 +16,20 @@ fi
 
 echo "-- harness structure --"
 ok=1
-[[ -L CLAUDE.md ]]                       || { echo "WARN: CLAUDE.md -> AGENTS.md symlink missing"; ok=0; }
-[[ -L GEMINI.md ]]                       || { echo "WARN: GEMINI.md -> AGENTS.md symlink missing"; ok=0; }
-[[ -f .github/copilot-instructions.md ]] || { echo "WARN: .github/copilot-instructions.md missing"; ok=0; }
-[[ -L .claude/skills ]]                  || { echo "WARN: .claude/skills -> .agents/skills symlink missing"; ok=0; }
-[[ -f .agents/state/PROGRESS.md ]]       || { echo "WARN: .agents/state/PROGRESS.md missing"; ok=0; }
-[[ -f .agents/state/feature_list.json ]] || { echo "WARN: .agents/state/feature_list.json missing"; ok=0; }
+[[ -f AGENTS.md ]]                       || { echo "FAIL: AGENTS.md missing (symlink targets dangle)"; ok=0; }
+[[ -L CLAUDE.md ]]                       || { echo "FAIL: CLAUDE.md -> AGENTS.md symlink missing"; ok=0; }
+[[ -L GEMINI.md ]]                       || { echo "FAIL: GEMINI.md -> AGENTS.md symlink missing"; ok=0; }
+[[ -f .github/copilot-instructions.md ]] || { echo "FAIL: .github/copilot-instructions.md missing"; ok=0; }
+[[ -L .claude/skills ]]                  || { echo "FAIL: .claude/skills -> .agents/skills symlink missing"; ok=0; }
+[[ -f .agents/state/PROGRESS.md ]]       || { echo "FAIL: .agents/state/PROGRESS.md missing"; ok=0; }
+[[ -f .agents/state/feature_list.json ]] || { echo "FAIL: .agents/state/feature_list.json missing"; ok=0; }
 if [[ $ok -eq 1 ]]; then echo "structure OK"; fi
 
 echo "-- git status --"
 git status --short --branch
 
 echo "-- recent history --"
-git log --oneline -5
+git log --oneline -5 2>/dev/null || echo "(no commits yet)"
 
 echo "-- state snapshot --"
 if [[ -f .agents/state/PROGRESS.md ]]; then
@@ -56,4 +57,9 @@ fi
 #   npm run typecheck
 #   uv run python -c "import myapp"
 
-echo "== init OK. Pick ONE feature: user request or next todo in feature_list.json. =="
+if [[ $ok -eq 1 ]]; then
+  echo "== init OK. Pick ONE feature: user request or next todo in feature_list.json. =="
+else
+  echo "== init FAILED: fix the structure FAILs above before feature work. =="
+  exit 1
+fi
