@@ -1,0 +1,7 @@
+# Agent-local settings (per-user, never shared)
+.claude/settings.local.json
+
+# OS noise
+.DS_Store
+
+# TODO(setup): add stack-specific ignores (node_modules/, .venv/, dist/, target/, ...)
