@@ -6,6 +6,7 @@ cd "$(git rev-parse --show-toplevel)"
 
 echo "== verify: definition of done =="
 
+# TEMPLATE: delete this guard during bootstrap.
 if [[ -f TEMPLATE_SETUP.md ]]; then
   echo "TEMPLATE_SETUP.md exists: verify pipeline not configured yet."
   echo "Fill the TODO(setup) blocks below as part of template setup."

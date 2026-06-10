@@ -6,14 +6,18 @@ All agent-facing infrastructure lives here. Humans rarely need to look inside.
 |---|---|---|
 | `docs/` | Deep-dive docs: architecture, conventions, testing, token style | Read on demand, keep current |
 | `docs/reference/` | Background reading (research, design rationale) | Rarely changes |
-| `scripts/init.sh` | Session-start health check | Run at every session start |
+| `scripts/init.sh` | Session-start health check + state snapshot | Every session start (auto via hook) |
 | `scripts/verify.sh` | Definition of done: test + lint + typecheck + build | Run before claiming done |
 | `skills/` | Task playbooks (`<name>/SKILL.md`) | Add one per recurring task |
 | `state/PROGRESS.md` | Append-only session log | Update at session end |
 | `state/feature_list.json` | Scope: features + status | Update when status changes |
 
+`AGENTS.md` (repo root) is the single manual; per-agent entrypoints map to it:
+`CLAUDE.md` and `GEMINI.md` are symlinks, Codex reads `AGENTS.md` natively,
+and `.github/copilot-instructions.md` points Copilot at it.
 `.claude/skills` symlinks to `skills/` so Claude Code auto-discovers them.
-`CLAUDE.md` (repo root) symlinks to `AGENTS.md` for the same reason.
+`.claude/settings.json` wires a SessionStart hook that auto-runs
+`scripts/init.sh` and pre-approves both harness scripts.
 
 Design principles (from harness-engineering research, see `docs/reference/`):
 

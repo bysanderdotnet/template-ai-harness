@@ -34,12 +34,16 @@ Run from repo root. Never claim "done" without `verify.sh` passing.
 | `.agents/state/PROGRESS.md` | Session log. Read at start, update at end |
 | `.agents/state/feature_list.json` | Scope. Work on one item at a time |
 | `.agents/skills/` | Task playbooks (also via `.claude/skills`) |
+| `.claude/settings.json` | Claude Code hooks (auto-runs `init.sh`) + script permissions |
+| `CLAUDE.md`, `GEMINI.md` | Symlinks to this file (Claude Code, Gemini CLI). Codex reads `AGENTS.md` natively |
+| `.github/copilot-instructions.md` | Copilot entrypoint: points here, mirrors core rules |
 | <!-- TODO(setup): src dirs --> | |
 
 ## Session lifecycle
 
 1. Read this file + `.agents/state/PROGRESS.md`.
-2. Run `.agents/scripts/init.sh`. Fix env problems before features.
+2. Run `.agents/scripts/init.sh` (Claude Code auto-runs it at session start —
+   check its output before rerunning). Fix env problems before features.
 3. Pick ONE item: user request or next `feature_list.json` item.
 4. Implement. Stay in scope.
 5. Run `.agents/scripts/verify.sh`. Green = done. Red = not done, say so.

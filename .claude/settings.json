@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"${CLAUDE_PROJECT_DIR:-.}\" && bash .agents/scripts/init.sh 2>&1 || true"
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(.agents/scripts/init.sh:*)",
+      "Bash(bash .agents/scripts/init.sh:*)",
+      "Bash(.agents/scripts/verify.sh:*)",
+      "Bash(bash .agents/scripts/verify.sh:*)"
+    ]
+  }
+}
