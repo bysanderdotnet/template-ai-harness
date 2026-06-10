@@ -1,11 +1,30 @@
 # Agent-local settings (per-user, never shared)
 .claude/settings.local.json
 
-# Harness scratch state (per-checkout, written by .agents/agents.py verify)
+# Harness scratch state (per-checkout, written by ./agents.sh verify)
 .agents/state/last_verify.json
 
-# OS noise
-.DS_Store
+# Python/cache noise
 __pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# TODO(setup): add stack-specific ignores (node_modules/, .venv/, dist/, target/, ...)
+# Virtual environments and local env files
+.venv/
+venv/
+.env
+.env.*
+
+# Build/output directories common to projects created from this template
+build/
+dist/
+coverage/
+node_modules/
+target/
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/

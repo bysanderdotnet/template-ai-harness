@@ -18,12 +18,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # TODO(setup): install the project toolchain so `agents.py ci` can run
-      # the registered verify commands. Examples:
-      #   - uses: actions/setup-node@v4
-      #     with: { node-version: 22, cache: npm }
-      #   - uses: astral-sh/setup-uv@v5
-
       - name: Harness gates
         # check always; init + verify once guided setup is complete.
-        run: python3 .agents/agents.py ci
+        run: ./agents.sh ci

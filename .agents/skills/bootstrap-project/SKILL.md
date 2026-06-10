@@ -1,6 +1,6 @@
 ---
 name: bootstrap-project
-description: First-session setup for a project created from template-ai-harness. Use when `agents.py init` reports SETUP MODE, or when the user asks to initialize/configure/bootstrap this project from the template.
+description: First-session setup for a project created from template-ai-harness. Use when `./agents.sh init` reports SETUP MODE, or when the user asks to initialize/configure/bootstrap this project from the template.
 ---
 
 # Bootstrap project from template
@@ -9,7 +9,7 @@ The harness itself guides setup — this skill just points you at it.
 
 ## Steps
 
-1. Run `python3 .agents/agents.py setup`. It shows step status and full
+1. Run `./agents.sh setup`. It shows step status and full
    instructions for the current step only.
 2. Do what the current step says, then rerun `setup`. Steps with automatic
    checks complete themselves; manual steps end with `setup done <step>`.
