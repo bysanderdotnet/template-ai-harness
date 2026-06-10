@@ -1,37 +1,25 @@
 ---
 name: session-handoff
-description: End-of-session handoff — update PROGRESS.md and feature_list.json so the next session resumes without cold start. Use when wrapping up work, when the user says to stop/pause, or before context runs out.
+description: End-of-session handoff — record progress and close out state so the next session resumes without cold start. Use when wrapping up work, when the user says to stop/pause, or before context runs out.
 ---
 
 # Session handoff
 
-State on disk beats memory in context. Next session reads files, not this conversation.
+State on disk beats memory in context. The harness checks the handoff for you.
 
 ## Steps
 
-1. Run `.agents/scripts/verify.sh`. Record exact result.
-2. Prepend entry to `.agents/state/PROGRESS.md` using its format. Caveman style.
-   Must contain: done (paths/commits), verified status, known issues, next step, blockers.
-3. PROGRESS.md over 10 entries → move oldest beyond 10 to top of
-   `.agents/state/PROGRESS-archive.md` (create if missing). Keeps session-start reads cheap.
-4. Update `.agents/state/feature_list.json` statuses. Max one `in_progress`.
-5. Uncommitted work?
-   - Coherent + verified → commit.
-   - Half-done → commit on feature branch with `wip:` prefix, note branch in PROGRESS.md.
-   - Remote/ephemeral session (container dies after session) → push after commit, or work is lost.
-   - Never hand off dirty working tree silently.
-6. New durable decision made this session → one line in
-   `.agents/docs/architecture.md` "Key decisions".
-7. Skill sweep: did this session repeat a multi-step procedure, or figure out
-   non-obvious steps likely to recur? → capture as skill
-   (playbook: `.agents/skills/new-skill/SKILL.md`). One-off → skip.
-8. Drift sweep: commands/stack/structure changed this session (new build,
-   test, lint step; new tool; new src dir)? Sync AGENTS.md command table +
-   repo map, `init.sh`, `verify.sh`, `.github/workflows/verify.yml`. No
-   change → skip.
+1. Run `python3 .agents/agents.py handoff`. It shows a live checklist:
+   verify status, progress entry, feature state, commit, push.
+2. Clear every `[..]` item it lists (each one names the exact command).
+3. Rerun `handoff` until it reports clean. Never hand off a dirty working
+   tree or an unpushed ephemeral session silently.
+4. Sweep the "also consider" list it prints: durable decisions →
+   `.agents/docs/architecture.md`; recurring procedure → new skill
+   (`.agents/skills/new-skill/SKILL.md`); changed commands → `cmd set` + CI.
 
 ## Quality bar
 
-Next agent must answer from files alone: what works, what's broken, what's next,
-what to not touch. If conversation context contains a fact needed for that,
-write it down now.
+Next agent must answer from `agents.py init` output + files alone: what
+works, what's broken, what's next, what to not touch. If conversation context
+contains a fact needed for that, put it in the log entry now.

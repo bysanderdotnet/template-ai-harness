@@ -1,7 +1,11 @@
 # Agent-local settings (per-user, never shared)
 .claude/settings.local.json
 
+# Harness scratch state (per-checkout, written by .agents/agents.py verify)
+.agents/state/last_verify.json
+
 # OS noise
 .DS_Store
+__pycache__/
 
 # TODO(setup): add stack-specific ignores (node_modules/, .venv/, dist/, target/, ...)

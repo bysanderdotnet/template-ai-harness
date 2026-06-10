@@ -1,0 +1,4 @@
+{
+  "$comment": "Append-only session log, owned by .agents/agents.py — write with `agents.py log`, read with `agents.py progress`, do not hand-edit. Display is bounded by the script; the file may grow freely. Entry text: terse caveman style (.agents/docs/token-efficiency.md).",
+  "entries": []
+}
