@@ -15,7 +15,9 @@ that let agents work reliably across sessions.
 AGENTS.md                  Agent operating manual (short, table-of-contents style)
 CLAUDE.md -> AGENTS.md     Symlink so Claude Code picks it up
 TEMPLATE_SETUP.md          First-session checklist; deleted once setup is done
-.claude/skills -> .agents/skills   Skill auto-discovery for Claude Code
+.claude/
+├── settings.json          SessionStart hook (auto-runs init.sh) + script permissions
+└── skills -> .agents/skills   Skill auto-discovery for Claude Code
 .agents/
 ├── README.md              Map of the harness + design principles
 ├── docs/
@@ -23,9 +25,9 @@ TEMPLATE_SETUP.md          First-session checklist; deleted once setup is done
 │   ├── conventions.md     Code style, commits, branches      (template)
 │   ├── testing.md         How to run/write tests             (template)
 │   ├── token-efficiency.md  Terse "caveman" style rules      (ready to use)
-│   └── reference/         Background research on harness engineering
+│   └── reference/         Distilled harness-engineering research + sources
 ├── scripts/
-│   ├── init.sh            Session-start health check
+│   ├── init.sh            Session-start health check + state snapshot
 │   └── verify.sh          Definition of done: test/lint/typecheck/build
 ├── skills/
 │   ├── bootstrap-project/ Playbook for completing template setup
@@ -40,7 +42,7 @@ TEMPLATE_SETUP.md          First-session checklist; deleted once setup is done
 
 Based on harness-engineering research (OpenAI, Anthropic,
 [learn-harness-engineering](https://github.com/walkinglabs/learn-harness-engineering));
-full report in `.agents/docs/reference/`.
+distilled with sources in `.agents/docs/reference/harness-principles.md`.
 
 1. **Instructions** — `AGENTS.md` stays short and links out; agents load
    detail docs on demand (progressive disclosure).
@@ -49,8 +51,9 @@ full report in `.agents/docs/reference/`.
 3. **Verification** — `verify.sh` is the machine-checkable definition of
    done; no green run, no "done".
 4. **Scope** — one feature at a time, tracked in `feature_list.json`.
-5. **Lifecycle** — `init.sh` at session start, `session-handoff` skill at
-   session end.
+5. **Lifecycle** — `init.sh` at session start (Claude Code runs it
+   automatically via a SessionStart hook and gets git status + latest progress
+   entry injected into context), `session-handoff` skill at session end.
 
 Plus a token-efficiency convention (`.agents/docs/token-efficiency.md`):
 agent-to-agent text is written in maximally terse "caveman" style; code and
@@ -59,6 +62,8 @@ human-facing docs stay normal.
 ## Using the template
 
 1. Create a new repo from this template (GitHub: *Use this template*).
-2. Start an agent session; it will hit `TEMPLATE_SETUP.md` via `init.sh`
-   and complete the checklist (fill commands, docs, feature list).
+2. Start an agent session. Claude Code will ask to trust the repo's
+   `.claude/settings.json` (it wires the SessionStart hook) — accept it.
+   The hook runs `init.sh`, which surfaces `TEMPLATE_SETUP.md`; the agent
+   completes the checklist (fill commands, docs, feature list).
 3. From then on, every session follows the lifecycle in `AGENTS.md`.

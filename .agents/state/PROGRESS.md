@@ -1,6 +1,10 @@
 # Progress log
 
-Append-only. Newest entry first. Caveman style (see `.agents/docs/token-efficiency.md`).
+Newest entry first; never rewrite old entries. Caveman style (see
+`.agents/docs/token-efficiency.md`).
+
+Compaction: keep ≤10 entries here. Overflow moves to
+`.agents/state/PROGRESS-archive.md` (newest first there too — insert at top).
 
 Entry format:
 

@@ -4,8 +4,8 @@ This repo was created from `template-ai-harness`. The harness is scaffolded
 but not configured. An agent (or human) must finish setup before feature work.
 
 Agent: work through the checklist top to bottom. Ask the user for anything you
-cannot infer from the codebase. When all boxes are checked, delete this file
-and commit `chore: complete template setup`.
+cannot infer from the codebase. The final section deletes this file and
+commits `chore: complete template setup`.
 
 ## Checklist
 
@@ -19,8 +19,10 @@ and commit `chore: complete template setup`.
 - [ ] Implement the TODO blocks in `.agents/scripts/init.sh`
       (dependency install check, quick env sanity check).
 - [ ] Implement the TODO blocks in `.agents/scripts/verify.sh`
-      (test, lint, typecheck, build — whatever exists).
-- [ ] Run both scripts. They must exit 0 on a healthy checkout.
+      (test, lint, typecheck, build — whatever exists). Remove the trailing
+      `exit 1` fallback.
+- [ ] Delete the `TEMPLATE:` guard blocks in both scripts. (While this file
+      exists they exit 1 by design; the final run check is in section 6.)
 
 ### 3. Docs
 - [ ] Fill `.agents/docs/architecture.md` (modules, data flow, key dirs).
@@ -37,5 +39,8 @@ and commit `chore: complete template setup`.
 - [ ] Review `.gitignore` for the chosen stack.
 
 ### 6. Finish
-- [ ] Search repo for remaining `TODO(setup)` markers — must be zero.
-- [ ] Delete this file. Commit and push.
+- [ ] Delete this file.
+- [ ] `bash .agents/scripts/init.sh` and `bash .agents/scripts/verify.sh` exit 0.
+- [ ] `git grep -n "TODO(setup)" -- ':!.agents/skills'` returns nothing
+      (skill playbooks legitimately mention the marker).
+- [ ] Commit `chore: complete template setup`. Push.

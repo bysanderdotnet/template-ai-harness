@@ -34,6 +34,13 @@ Numbered, concrete, commands included. Cheap checks first.
 Constraints, failure modes, what NOT to do.
 ```
 
+## Steps
+
+1. `mkdir -p .agents/skills/<name>`
+2. Write `SKILL.md` per format above.
+3. Helper scripts → same dir, reference by path.
+4. Mention the skill in AGENTS.md only if it gates the core workflow.
+
 ## Quality bar
 
 - Body ≤ ~80 lines. Longer → split details into extra files in the skill dir,
@@ -41,10 +48,3 @@ Constraints, failure modes, what NOT to do.
 - Commands copy-pasteable from repo root.
 - Caveman style (see `.agents/docs/token-efficiency.md`).
 - Test: could a fresh agent with zero conversation context execute it? If no, fix.
-
-## Steps
-
-1. `mkdir -p .agents/skills/<name>`
-2. Write `SKILL.md` per format above.
-3. Helper scripts → same dir, reference by path.
-4. Mention the skill in AGENTS.md only if it gates the core workflow.

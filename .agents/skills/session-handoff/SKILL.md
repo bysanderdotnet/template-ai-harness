@@ -12,12 +12,14 @@ State on disk beats memory in context. Next session reads files, not this conver
 1. Run `.agents/scripts/verify.sh`. Record exact result.
 2. Prepend entry to `.agents/state/PROGRESS.md` using its format. Caveman style.
    Must contain: done (paths/commits), verified status, known issues, next step, blockers.
-3. Update `.agents/state/feature_list.json` statuses. Max one `in_progress`.
-4. Uncommitted work?
+3. PROGRESS.md over 10 entries → move oldest beyond 10 to top of
+   `.agents/state/PROGRESS-archive.md` (create if missing). Keeps session-start reads cheap.
+4. Update `.agents/state/feature_list.json` statuses. Max one `in_progress`.
+5. Uncommitted work?
    - Coherent + verified → commit.
    - Half-done → commit on feature branch with `wip:` prefix, note branch in PROGRESS.md.
    - Never hand off dirty working tree silently.
-5. New durable decision made this session → one line in
+6. New durable decision made this session → one line in
    `.agents/docs/architecture.md` "Key decisions".
 
 ## Quality bar
