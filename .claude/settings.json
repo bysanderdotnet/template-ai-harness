@@ -17,7 +17,10 @@
       "Bash(.agents/scripts/init.sh:*)",
       "Bash(bash .agents/scripts/init.sh:*)",
       "Bash(.agents/scripts/verify.sh:*)",
-      "Bash(bash .agents/scripts/verify.sh:*)"
+      "Bash(bash .agents/scripts/verify.sh:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)"
     ]
   }
 }

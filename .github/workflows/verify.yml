@@ -4,10 +4,17 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+# Superseded runs on the same branch/PR are wasted minutes; cancel them.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 30 # raise if builds are slow
     steps:
       - uses: actions/checkout@v4
 
@@ -16,6 +23,15 @@ jobs:
       #   - uses: actions/setup-node@v4
       #     with: { node-version: 22, cache: npm }
       #   - uses: astral-sh/setup-uv@v5
+
+      - name: Harness health check
+        run: |
+          # TEMPLATE: delete this guard during bootstrap.
+          if [[ -f TEMPLATE_SETUP.md ]]; then
+            echo "Template not bootstrapped yet; skipping checks."
+            exit 0
+          fi
+          bash .agents/scripts/init.sh
 
       - name: Run definition of done
         run: |

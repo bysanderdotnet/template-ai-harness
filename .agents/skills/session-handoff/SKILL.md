@@ -18,6 +18,7 @@ State on disk beats memory in context. Next session reads files, not this conver
 5. Uncommitted work?
    - Coherent + verified → commit.
    - Half-done → commit on feature branch with `wip:` prefix, note branch in PROGRESS.md.
+   - Remote/ephemeral session (container dies after session) → push after commit, or work is lost.
    - Never hand off dirty working tree silently.
 6. New durable decision made this session → one line in
    `.agents/docs/architecture.md` "Key decisions".
