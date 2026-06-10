@@ -12,9 +12,12 @@ that let agents work reliably across sessions.
 ## What's inside
 
 ```
-AGENTS.md                  Agent operating manual (short, table-of-contents style)
-CLAUDE.md -> AGENTS.md     Symlink so Claude Code picks it up
+AGENTS.md                  Agent operating manual — the single source of truth
+CLAUDE.md -> AGENTS.md     Claude Code entrypoint (symlink)
+GEMINI.md -> AGENTS.md     Gemini CLI entrypoint (symlink)
 TEMPLATE_SETUP.md          First-session checklist; deleted once setup is done
+.github/
+└── copilot-instructions.md  GitHub Copilot entrypoint (points to AGENTS.md)
 .claude/
 ├── settings.json          SessionStart hook (auto-runs init.sh) + script permissions
 └── skills -> .agents/skills   Skill auto-discovery for Claude Code
@@ -37,6 +40,19 @@ TEMPLATE_SETUP.md          First-session checklist; deleted once setup is done
     ├── PROGRESS.md        Append-only session log
     └── feature_list.json  Scope contract: one feature at a time
 ```
+
+## Works with
+
+| Agent | Entrypoint | Extras |
+|---|---|---|
+| Claude Code | `CLAUDE.md` (symlink) | SessionStart hook auto-runs `init.sh`; skills auto-discovered; script permissions pre-approved |
+| OpenAI Codex | `AGENTS.md` (read natively) | — |
+| Gemini CLI | `GEMINI.md` (symlink) | — |
+| GitHub Copilot | `.github/copilot-instructions.md` | Points to `AGENTS.md` and mirrors its core rules for surfaces that can't open repo files (e.g. code review) |
+
+One manual, four entrypoints. Agents without Claude Code's hook support run
+`.agents/scripts/init.sh` manually — the session lifecycle in `AGENTS.md`
+instructs them to.
 
 ## Design principles
 
@@ -62,8 +78,10 @@ human-facing docs stay normal.
 ## Using the template
 
 1. Create a new repo from this template (GitHub: *Use this template*).
-2. Start an agent session. Claude Code will ask to trust the repo's
-   `.claude/settings.json` (it wires the SessionStart hook) — accept it.
-   The hook runs `init.sh`, which surfaces `TEMPLATE_SETUP.md`; the agent
-   completes the checklist (fill commands, docs, feature list).
+2. Start an agent session. With Claude Code: accept the prompt to trust the
+   repo's `.claude/settings.json` (it wires the SessionStart hook); the hook
+   runs `init.sh`, which surfaces `TEMPLATE_SETUP.md`. With Codex, Gemini
+   CLI, or Copilot: the agent picks up the manual via its entrypoint and
+   runs `init.sh` itself. Either way, the agent completes the checklist
+   (fill commands, docs, feature list).
 3. From then on, every session follows the lifecycle in `AGENTS.md`.

@@ -17,6 +17,8 @@ fi
 echo "-- harness structure --"
 ok=1
 [[ -L CLAUDE.md ]]                       || { echo "WARN: CLAUDE.md -> AGENTS.md symlink missing"; ok=0; }
+[[ -L GEMINI.md ]]                       || { echo "WARN: GEMINI.md -> AGENTS.md symlink missing"; ok=0; }
+[[ -f .github/copilot-instructions.md ]] || { echo "WARN: .github/copilot-instructions.md missing"; ok=0; }
 [[ -L .claude/skills ]]                  || { echo "WARN: .claude/skills -> .agents/skills symlink missing"; ok=0; }
 [[ -f .agents/state/PROGRESS.md ]]       || { echo "WARN: .agents/state/PROGRESS.md missing"; ok=0; }
 [[ -f .agents/state/feature_list.json ]] || { echo "WARN: .agents/state/feature_list.json missing"; ok=0; }

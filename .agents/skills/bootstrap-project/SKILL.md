@@ -29,7 +29,8 @@ Configures the harness for a concrete project. Driven by the checklist in
    - `bash .agents/scripts/init.sh` and `bash .agents/scripts/verify.sh` exit 0.
    - `git grep -n "TODO(setup)" -- ':!.agents/skills'` returns nothing
      (skill playbooks legitimately mention the marker).
-   - `CLAUDE.md` still symlinks to `AGENTS.md`; `.claude/skills` to `.agents/skills`.
+   - Entrypoints intact: `CLAUDE.md` and `GEMINI.md` symlink to `AGENTS.md`,
+     `.claude/skills` to `.agents/skills`, `.github/copilot-instructions.md` exists.
 6. Mark feature F-000 done. Write first `PROGRESS.md` entry (caveman style).
 7. Commit: `chore: complete template setup`. Push if user expects it.
 
