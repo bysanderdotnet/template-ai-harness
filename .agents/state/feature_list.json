@@ -1,5 +1,5 @@
 {
-  "$comment": "Scope contract. One feature in_progress at a time. Status: todo | in_progress | done | blocked. Agents: update status, never delete entries — mark done. Seed during template setup.",
+  "$comment": "Scope contract. One feature in_progress at a time. Status: todo | in_progress | done | blocked. Entry fields: id, title, status, notes (optional). Agents: update status, never delete entries — mark done. Keep valid JSON: init.sh parses this file and fails the session start if it is broken or has >1 in_progress. Seed during template setup.",
   "features": [
     {
       "id": "F-000",
