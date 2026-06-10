@@ -1,11 +1,11 @@
 {
-  "$comment": "Scope contract. One feature in_progress at a time. Status: todo | in_progress | done | blocked. Entry fields: id, title, status, notes (optional). Agents: update status, never delete entries — mark done. Keep valid JSON: init.sh parses this file and fails the session start if it is broken or has >1 in_progress. Seed during template setup.",
+  "$comment": "Scope contract. Managed by `python3 .agents/harness.py feature add/start/done/block/note` — do not hand-edit. Status: todo | in_progress | done | blocked; max one in_progress; never delete entries, mark done. Seed during template setup.",
   "features": [
     {
       "id": "F-000",
       "title": "Complete template setup (TEMPLATE_SETUP.md)",
       "status": "todo",
-      "notes": "Delete this entry's notes after setup; keep entry as done."
+      "notes": "Done when TEMPLATE_SETUP.md is deleted and init + verify exit 0."
     }
   ]
 }

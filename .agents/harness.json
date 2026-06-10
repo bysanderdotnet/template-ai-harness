@@ -1,0 +1,4 @@
+{
+  "$comment": "Harness config. Managed by `python3 .agents/harness.py cmd set/rm` — register commands through the script, do not hand-edit. Flags: verify = part of definition of done (run by `verify`, in listed order, cheap/fast first); init = session-start smoke check (run by `init`).",
+  "commands": {}
+}

@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # TODO(setup): install the project toolchain before running verify.sh.
+      # TODO(setup): install the project toolchain before running verify.
       # Examples:
       #   - uses: actions/setup-node@v4
       #     with: { node-version: 22, cache: npm }
@@ -26,25 +26,17 @@ jobs:
 
       - name: Harness health check
         run: |
-          # TEMPLATE: delete this guard during bootstrap.
-          if [[ -f TEMPLATE_SETUP.md ]]; then
-            echo "Template not bootstrapped yet; running template self-checks instead."
-            bash -n .agents/scripts/init.sh
-            bash -n .agents/scripts/verify.sh
-            [[ -L CLAUDE.md && -L GEMINI.md && -L .claude/skills ]]
-            python3 -c "import json; json.load(open('.agents/state/feature_list.json'))"
-            for f in .agents/skills/*/SKILL.md; do
-              grep -q '^description: ' "$f" || { echo "FAIL: $f missing description frontmatter"; exit 1; }
-            done
-            exit 0
+          python3 .agents/harness.py check
+          # Before bootstrap (TEMPLATE_SETUP.md present) init/verify exit 1
+          # by design; the structure check above is the whole gate then.
+          if [[ ! -f TEMPLATE_SETUP.md ]]; then
+            python3 .agents/harness.py init
           fi
-          bash .agents/scripts/init.sh
 
       - name: Run definition of done
         run: |
-          # TEMPLATE: delete this guard during bootstrap.
           if [[ -f TEMPLATE_SETUP.md ]]; then
             echo "Template not bootstrapped yet; skipping verify."
             exit 0
           fi
-          bash .agents/scripts/verify.sh
+          python3 .agents/harness.py verify

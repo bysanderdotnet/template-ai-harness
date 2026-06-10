@@ -7,6 +7,10 @@ Agent: work through the checklist top to bottom. Ask the user for anything you
 cannot infer from the codebase. The final section deletes this file and
 commits `chore: complete template setup`.
 
+While this file exists, `harness.py init` and `verify` exit 1 by design;
+the final run check is in section 6. Every other harness subcommand
+(`cmd`, `feature`, `log`, ...) already works — use them during setup.
+
 ## Checklist
 
 ### 1. Project identity
@@ -14,19 +18,14 @@ commits `chore: complete template setup`.
 - [ ] Rewrite `README.md` for the actual project (template text is placeholder).
 
 ### 2. Commands
-- [ ] Fill the command table in `AGENTS.md` (build/test/lint/typecheck/dev).
-      If the project has no code yet, fill in what's planned and mark `(planned)`.
-- [ ] Implement the TODO blocks in `.agents/scripts/init.sh`
-      (dependency install check, quick env sanity check).
-- [ ] Implement the TODO blocks in `.agents/scripts/verify.sh`
-      (test, lint, typecheck, build — whatever exists). Remove the trailing
-      `exit 1` fallback.
-- [ ] Add toolchain setup to `.github/workflows/verify.yml` (the
-      `TODO(setup)` block) so CI can run `verify.sh`.
-- [ ] Delete the `TEMPLATE:` guard blocks in both scripts, the bootstrap
-      skip in `.github/workflows/verify.yml`, and the `TEMPLATE:` comment at
-      the top of `AGENTS.md`. (While this file exists the scripts exit 1 by
-      design; the final run check is in section 6.)
+- [ ] Register project commands with the harness (no script editing):
+      `python3 .agents/harness.py cmd set lint "npm run lint" --verify`,
+      same for typecheck/test/build (`--verify`, registered cheap/fast first),
+      dependency/env checks with `--init`, and dev/run helpers with neither
+      flag. If the project has no code yet, skip and add a feature
+      "set up toolchain + verify commands" in step 4 instead.
+- [ ] Add toolchain setup to `.github/workflows/agents.yml` (the
+      `TODO(setup)` block) so CI can run `harness.py verify`.
 
 ### 3. Docs
 - [ ] Fill `.agents/docs/architecture.md` (modules, data flow, key dirs).
@@ -35,16 +34,19 @@ commits `chore: complete template setup`.
 - [ ] Add source-dir rows to the repo map in `AGENTS.md`.
 
 ### 4. Scope & state
-- [ ] Seed `.agents/state/feature_list.json` with initial features (with the user).
-- [ ] Write a first entry in `.agents/state/PROGRESS.md` describing setup.
+- [ ] Seed initial features (with the user):
+      `python3 .agents/harness.py feature add "<title>"` per feature.
+- [ ] Record setup as the first progress entry:
+      `python3 .agents/harness.py log "template setup" --done "..." --next "..."`.
 
 ### 5. Guardrails
 - [ ] Add project-specific rules / no-go zones to `## Rules` in `AGENTS.md`.
 - [ ] Review `.gitignore` for the chosen stack.
 
 ### 6. Finish
-- [ ] Delete this file.
-- [ ] `bash .agents/scripts/init.sh` and `bash .agents/scripts/verify.sh` exit 0.
+- [ ] Mark feature F-000 done: `python3 .agents/harness.py feature done F-000`.
+- [ ] Delete this file. Delete the `TEMPLATE:` comment at the top of `AGENTS.md`.
+- [ ] `python3 .agents/harness.py init` and `python3 .agents/harness.py verify` exit 0.
 - [ ] `git grep -nE "TODO\(setup\)|TEMPLATE:" -- ':!.agents/skills'` returns
       nothing (skill playbooks legitimately mention the markers).
 - [ ] Commit `chore: complete template setup`. Push.

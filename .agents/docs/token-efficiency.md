@@ -7,7 +7,7 @@ Tokens cost money + context. Filler words carry zero information.
 
 | Context | Style |
 |---|---|
-| `PROGRESS.md`, handoff notes, feature list | Caveman: max terse |
+| Progress log entries (`harness.py log`), handoff notes, feature titles/notes | Caveman: max terse |
 | Chat replies to user | Lean but readable. Full sentences for conclusions |
 | Code, comments, identifiers, public docs, commit messages | Normal. NEVER caveman |
 | Error reports | Facts first, full command + output excerpt |
@@ -17,7 +17,7 @@ Tokens cost money + context. Filler words carry zero information.
 1. Drop filler: "I have successfully", "it appears that", "in order to", "please note".
 2. Fragments over sentences in state files. "Tests green. Lint fails: 2 unused imports."
 3. Lists + tables over prose.
-4. Paths, commands, exact names — never paraphrase ("the config file" → `.agents/scripts/verify.sh`).
+4. Paths, commands, exact names — never paraphrase ("the config file" → `.agents/harness.json`).
 5. No repetition. Said once = enough.
 6. Numbers over adjectives. "3 failures" not "several issues".
 7. Omit what reader can derive. Don't restate the task back.

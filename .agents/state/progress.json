@@ -1,0 +1,4 @@
+{
+  "$comment": "Append-only session log. Managed by `python3 .agents/harness.py log` (write) and `progress` (read) — do not hand-edit. Display is bounded by the script; the file may grow freely. Entry text: terse caveman style (.agents/docs/token-efficiency.md).",
+  "entries": []
+}
