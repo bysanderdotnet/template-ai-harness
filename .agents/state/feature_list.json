@@ -1,11 +1,11 @@
 {
-  "$comment": "Scope contract. Managed by `python3 .agents/harness.py feature add/start/done/block/note` — do not hand-edit. Status: todo | in_progress | done | blocked; max one in_progress; never delete entries, mark done. Seed during template setup.",
+  "$comment": "Scope contract, owned by .agents/agents.py — manage with `agents.py feature add/start/done/block/note`, do not hand-edit. Status: todo | in_progress | done | blocked; max one in_progress; never delete entries, mark done.",
   "features": [
     {
       "id": "F-000",
-      "title": "Complete template setup (TEMPLATE_SETUP.md)",
+      "title": "Complete guided project setup",
       "status": "todo",
-      "notes": "Done when TEMPLATE_SETUP.md is deleted and init + verify exit 0."
+      "notes": "Run: python3 .agents/agents.py setup — auto-closed when setup finalizes."
     }
   ]
 }

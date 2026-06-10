@@ -37,9 +37,9 @@ Framework from learn-harness-engineering; mapping to this template:
 |---|---|---|
 | Instructions | What/how, progressive disclosure | `AGENTS.md` + `.agents/docs/` |
 | State | Survive across sessions | `.agents/state/` |
-| Verification | Mechanical definition of done | `harness.py verify` (registered commands) |
+| Verification | Mechanical definition of done | `agents.py verify` (registered commands) |
 | Scope | One feature at a time | `feature_list.json` |
-| Lifecycle | Clean start + clean handoff | `harness.py init` hook, session-handoff skill |
+| Lifecycle | Clean start + clean handoff | `agents.py init` hook + `agents.py handoff` |
 
 ## Practices worth copying
 

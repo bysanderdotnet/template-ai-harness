@@ -18,25 +18,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # TODO(setup): install the project toolchain before running verify.
-      # Examples:
+      # TODO(setup): install the project toolchain so `agents.py ci` can run
+      # the registered verify commands. Examples:
       #   - uses: actions/setup-node@v4
       #     with: { node-version: 22, cache: npm }
       #   - uses: astral-sh/setup-uv@v5
 
-      - name: Harness health check
-        run: |
-          python3 .agents/harness.py check
-          # Before bootstrap (TEMPLATE_SETUP.md present) init/verify exit 1
-          # by design; the structure check above is the whole gate then.
-          if [[ ! -f TEMPLATE_SETUP.md ]]; then
-            python3 .agents/harness.py init
-          fi
-
-      - name: Run definition of done
-        run: |
-          if [[ -f TEMPLATE_SETUP.md ]]; then
-            echo "Template not bootstrapped yet; skipping verify."
-            exit 0
-          fi
-          python3 .agents/harness.py verify
+      - name: Harness gates
+        # check always; init + verify once guided setup is complete.
+        run: python3 .agents/agents.py ci

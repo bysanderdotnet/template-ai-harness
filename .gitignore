@@ -1,7 +1,7 @@
 # Agent-local settings (per-user, never shared)
 .claude/settings.local.json
 
-# Harness scratch state (per-checkout, written by .agents/harness.py verify)
+# Harness scratch state (per-checkout, written by .agents/agents.py verify)
 .agents/state/last_verify.json
 
 # OS noise

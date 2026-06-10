@@ -1,0 +1,7 @@
+{
+  "$comment": "Harness config, owned by .agents/agents.py — do not hand-edit. 'setup' tracks guided first-time setup (`agents.py setup`) and is removed when setup completes. 'commands' is the registry managed by `agents.py cmd set/rm`: verify = definition of done step (run by `verify`, in listed order, cheap/fast first); init = session-start smoke check.",
+  "setup": {
+    "done": []
+  },
+  "commands": {}
+}

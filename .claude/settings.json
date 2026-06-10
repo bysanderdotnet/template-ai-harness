@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"${CLAUDE_PROJECT_DIR:-.}\" && python3 .agents/harness.py init 2>&1 || true"
+            "command": "cd \"${CLAUDE_PROJECT_DIR:-.}\" && python3 .agents/agents.py init 2>&1 || true"
           }
         ]
       }
@@ -14,8 +14,8 @@
   },
   "permissions": {
     "allow": [
-      "Bash(python3 .agents/harness.py:*)",
-      "Bash(.agents/harness.py:*)",
+      "Bash(python3 .agents/agents.py:*)",
+      "Bash(.agents/agents.py:*)",
       "Bash(git status:*)",
       "Bash(git log:*)",
       "Bash(git diff:*)"
