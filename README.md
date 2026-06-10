@@ -17,7 +17,8 @@ CLAUDE.md -> AGENTS.md     Claude Code entrypoint (symlink)
 GEMINI.md -> AGENTS.md     Gemini CLI entrypoint (symlink)
 TEMPLATE_SETUP.md          First-session checklist; deleted once setup is done
 .github/
-└── copilot-instructions.md  GitHub Copilot entrypoint (points to AGENTS.md)
+├── copilot-instructions.md  GitHub Copilot entrypoint (points to AGENTS.md)
+└── workflows/verify.yml   CI: runs verify.sh on push/PR (skipped until setup)
 .claude/
 ├── settings.json          SessionStart hook (auto-runs init.sh) + script permissions
 └── skills -> .agents/skills   Skill auto-discovery for Claude Code
@@ -65,7 +66,8 @@ distilled with sources in `.agents/docs/reference/harness-principles.md`.
 2. **State** — `PROGRESS.md` + `feature_list.json` live on disk, so every
    session resumes instead of cold-starting.
 3. **Verification** — `verify.sh` is the machine-checkable definition of
-   done; no green run, no "done".
+   done; no green run, no "done". CI runs the same script on every push/PR,
+   so the gate holds even when an agent forgets to.
 4. **Scope** — one feature at a time, tracked in `feature_list.json`.
 5. **Lifecycle** — `init.sh` at session start (Claude Code runs it
    automatically via a SessionStart hook and gets git status + latest progress

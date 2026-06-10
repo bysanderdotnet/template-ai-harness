@@ -20,6 +20,9 @@ Configures the harness for a concrete project. Driven by the checklist in
    - `.agents/scripts/init.sh` + `verify.sh`: replace `TODO(setup)` blocks with
      real commands. Delete the `TEMPLATE:` guard blocks in both scripts and the
      trailing `exit 1` fallback in verify.sh.
+   - `.github/workflows/verify.yml`: fill the toolchain `TODO(setup)` block,
+     delete the bootstrap-skip guard. Delete the `TEMPLATE:` comment at the
+     top of `AGENTS.md`.
    - `.agents/docs/*.md`: fill `TODO(setup)` markers. Delete sections that
      don't apply. Empty doc is fine if marked "nothing yet".
    - `.agents/state/feature_list.json`: seed with features agreed with user.
@@ -27,8 +30,8 @@ Configures the harness for a concrete project. Driven by the checklist in
 4. Delete `TEMPLATE_SETUP.md`.
 5. Verify setup itself:
    - `bash .agents/scripts/init.sh` and `bash .agents/scripts/verify.sh` exit 0.
-   - `git grep -n "TODO(setup)" -- ':!.agents/skills'` returns nothing
-     (skill playbooks legitimately mention the marker).
+   - `git grep -nE "TODO\(setup\)|TEMPLATE:" -- ':!.agents/skills'` returns
+     nothing (skill playbooks legitimately mention the markers).
    - Entrypoints intact: `CLAUDE.md` and `GEMINI.md` symlink to `AGENTS.md`,
      `.claude/skills` to `.agents/skills`, `.github/copilot-instructions.md` exists.
 6. Mark feature F-000 done. Write first `PROGRESS.md` entry (caveman style).

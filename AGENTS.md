@@ -35,6 +35,7 @@ Run from repo root. Never claim "done" without `verify.sh` passing.
 | `.agents/state/feature_list.json` | Scope. Work on one item at a time |
 | `.agents/skills/` | Task playbooks (also via `.claude/skills`) |
 | `.claude/settings.json` | Claude Code hooks (auto-runs `init.sh`) + script permissions |
+| `.github/workflows/verify.yml` | CI: runs `verify.sh` on push/PR — same gate, enforced remotely |
 | `CLAUDE.md`, `GEMINI.md` | Symlinks to this file (Claude Code, Gemini CLI). Codex reads `AGENTS.md` natively |
 | `.github/copilot-instructions.md` | Copilot entrypoint: points here, mirrors core rules |
 | <!-- TODO(setup): src dirs --> | |
@@ -53,6 +54,9 @@ Run from repo root. Never claim "done" without `verify.sh` passing.
 
 - One feature per session/commit. No drive-by refactors.
 - Verification gates completion. No verify run = status "unverified".
+- Commands or stack changed (new build/test/lint step, new tool, new dep
+  manager)? Update the command table above + `init.sh` + `verify.sh` + CI in
+  the same commit. The harness drifts silently unless maintained.
 - Repo is source of truth. Decision worth keeping → write it to a file.
 - Blocked? Log blocker in `PROGRESS.md`, then stop or ask.
 - <!-- TODO(setup): project-specific no-go zones, e.g. "never edit /migrations" -->
