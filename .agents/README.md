@@ -18,6 +18,8 @@ and `.github/copilot-instructions.md` points Copilot at it.
 `.claude/skills` symlinks to `skills/` so Claude Code auto-discovers them.
 `.claude/settings.json` wires a SessionStart hook that auto-runs
 `scripts/init.sh` and pre-approves both harness scripts.
+`.github/workflows/verify.yml` runs `scripts/verify.sh` in CI — same gate,
+enforced remotely.
 
 Design principles (from harness-engineering research, see `docs/reference/`):
 

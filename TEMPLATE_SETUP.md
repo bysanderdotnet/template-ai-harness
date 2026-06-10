@@ -21,8 +21,12 @@ commits `chore: complete template setup`.
 - [ ] Implement the TODO blocks in `.agents/scripts/verify.sh`
       (test, lint, typecheck, build — whatever exists). Remove the trailing
       `exit 1` fallback.
-- [ ] Delete the `TEMPLATE:` guard blocks in both scripts. (While this file
-      exists they exit 1 by design; the final run check is in section 6.)
+- [ ] Add toolchain setup to `.github/workflows/verify.yml` (the
+      `TODO(setup)` block) so CI can run `verify.sh`.
+- [ ] Delete the `TEMPLATE:` guard blocks in both scripts, the bootstrap
+      skip in `.github/workflows/verify.yml`, and the `TEMPLATE:` comment at
+      the top of `AGENTS.md`. (While this file exists the scripts exit 1 by
+      design; the final run check is in section 6.)
 
 ### 3. Docs
 - [ ] Fill `.agents/docs/architecture.md` (modules, data flow, key dirs).
@@ -41,6 +45,6 @@ commits `chore: complete template setup`.
 ### 6. Finish
 - [ ] Delete this file.
 - [ ] `bash .agents/scripts/init.sh` and `bash .agents/scripts/verify.sh` exit 0.
-- [ ] `git grep -n "TODO(setup)" -- ':!.agents/skills'` returns nothing
-      (skill playbooks legitimately mention the marker).
+- [ ] `git grep -nE "TODO\(setup\)|TEMPLATE:" -- ':!.agents/skills'` returns
+      nothing (skill playbooks legitimately mention the markers).
 - [ ] Commit `chore: complete template setup`. Push.

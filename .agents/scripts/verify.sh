@@ -15,6 +15,9 @@ fi
 
 # TODO(setup): replace with real commands, remove the exit 1 fallback.
 # Keep order: cheap/fast checks first.
+# Keep in sync with the command table in AGENTS.md and with CI
+# (.github/workflows/verify.yml): a build/test step added to the project
+# but missing here is invisible to the definition of done.
 #
 #   echo "-- lint --";      npm run lint
 #   echo "-- typecheck --"; npm run typecheck

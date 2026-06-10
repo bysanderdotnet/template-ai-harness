@@ -21,6 +21,10 @@ State on disk beats memory in context. Next session reads files, not this conver
    - Never hand off dirty working tree silently.
 6. New durable decision made this session → one line in
    `.agents/docs/architecture.md` "Key decisions".
+7. Drift sweep: commands/stack/structure changed this session (new build,
+   test, lint step; new tool; new src dir)? Sync AGENTS.md command table +
+   repo map, `init.sh`, `verify.sh`, `.github/workflows/verify.yml`. No
+   change → skip.
 
 ## Quality bar
 

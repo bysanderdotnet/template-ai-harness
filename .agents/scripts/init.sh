@@ -45,6 +45,8 @@ if [[ -f .agents/state/feature_list.json ]]; then
   fi
 fi
 
+# Keep dependency/smoke checks below in sync with the command table in
+# AGENTS.md: new tools or dep managers added to the project belong here too.
 # TODO(setup): dependency check. Examples:
 #   command -v node >/dev/null || { echo "node missing"; exit 1; }
 #   [[ -d node_modules ]] || npm ci

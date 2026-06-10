@@ -1,0 +1,27 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # TODO(setup): install the project toolchain before running verify.sh.
+      # Examples:
+      #   - uses: actions/setup-node@v4
+      #     with: { node-version: 22, cache: npm }
+      #   - uses: astral-sh/setup-uv@v5
+
+      - name: Run definition of done
+        run: |
+          # TEMPLATE: delete this guard during bootstrap.
+          if [[ -f TEMPLATE_SETUP.md ]]; then
+            echo "Template not bootstrapped yet; skipping verify."
+            exit 0
+          fi
+          bash .agents/scripts/verify.sh
