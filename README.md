@@ -31,7 +31,7 @@ TEMPLATE_SETUP.md          First-session checklist; deleted once setup is done
 │   ├── token-efficiency.md  Terse "caveman" style rules      (ready to use)
 │   └── reference/         Distilled harness-engineering research + sources
 ├── scripts/
-│   ├── init.sh            Session-start health check + state snapshot
+│   ├── init.sh            Session-start health check, skills index, state snapshot + validation
 │   └── verify.sh          Definition of done: test/lint/typecheck/build
 ├── skills/
 │   ├── bootstrap-project/ Playbook for completing template setup
@@ -53,7 +53,9 @@ TEMPLATE_SETUP.md          First-session checklist; deleted once setup is done
 
 One manual, four entrypoints. Agents without Claude Code's hook support run
 `.agents/scripts/init.sh` manually — the session lifecycle in `AGENTS.md`
-instructs them to.
+instructs them to. Either way, `init.sh` prints a skills index (name +
+description per playbook), so every agent — not just Claude Code with its
+skill auto-discovery — sees which playbooks exist at session start.
 
 ## Design principles
 

@@ -46,7 +46,8 @@ Run from repo root. Never claim "done" without `verify.sh` passing.
 2. Run `.agents/scripts/init.sh` (Claude Code auto-runs it at session start —
    check its output before rerunning). Fix env problems before features.
 3. Pick ONE item: user request or next `feature_list.json` item.
-4. Implement. Stay in scope.
+4. Implement. Stay in scope. Task matches a skill (`init.sh` lists them,
+   dirs in `.agents/skills/`)? Follow the playbook, don't improvise.
 5. Run `.agents/scripts/verify.sh`. Green = done. Red = not done, say so.
 6. Update `PROGRESS.md` + `feature_list.json` (playbook:
    `.agents/skills/session-handoff/SKILL.md`). Commit per feature.
@@ -59,6 +60,9 @@ Run from repo root. Never claim "done" without `verify.sh` passing.
   manager)? Update the command table above + `init.sh` + `verify.sh` + CI in
   the same commit. The harness drifts silently unless maintained.
 - Repo is source of truth. Decision worth keeping → write it to a file.
+- Did a multi-step task that will recur (deploy, release, codegen, migration)?
+  Capture it as a skill before handoff — playbook:
+  `.agents/skills/new-skill/SKILL.md`. Don't wait to be asked.
 - Blocked? Log blocker in `PROGRESS.md`, then stop or ask.
 - <!-- TODO(setup): project-specific no-go zones, e.g. "never edit /migrations" -->
 

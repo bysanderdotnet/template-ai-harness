@@ -6,7 +6,7 @@ All agent-facing infrastructure lives here. Humans rarely need to look inside.
 |---|---|---|
 | `docs/` | Deep-dive docs: architecture, conventions, testing, token style | Read on demand, keep current |
 | `docs/reference/` | Background reading (research, design rationale) | Rarely changes |
-| `scripts/init.sh` | Session-start health check + state snapshot | Every session start (auto via hook) |
+| `scripts/init.sh` | Session-start health check + skills index + state snapshot (validates `feature_list.json`, warns on `PROGRESS.md` overflow) | Every session start (auto via hook) |
 | `scripts/verify.sh` | Definition of done: test + lint + typecheck + build | Run before claiming done |
 | `skills/` | Task playbooks (`<name>/SKILL.md`) | Add one per recurring task |
 | `state/PROGRESS.md` | Append-only session log | Update at session end |

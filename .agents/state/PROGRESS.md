@@ -5,6 +5,7 @@ Newest entry first; never rewrite old entries. Caveman style (see
 
 Compaction: keep ≤10 entries here. Overflow moves to
 `.agents/state/PROGRESS-archive.md` (newest first there too — insert at top).
+`init.sh` warns at session start when over the limit.
 
 Entry format:
 

@@ -28,7 +28,14 @@ jobs:
         run: |
           # TEMPLATE: delete this guard during bootstrap.
           if [[ -f TEMPLATE_SETUP.md ]]; then
-            echo "Template not bootstrapped yet; skipping checks."
+            echo "Template not bootstrapped yet; running template self-checks instead."
+            bash -n .agents/scripts/init.sh
+            bash -n .agents/scripts/verify.sh
+            [[ -L CLAUDE.md && -L GEMINI.md && -L .claude/skills ]]
+            python3 -c "import json; json.load(open('.agents/state/feature_list.json'))"
+            for f in .agents/skills/*/SKILL.md; do
+              grep -q '^description: ' "$f" || { echo "FAIL: $f missing description frontmatter"; exit 1; }
+            done
             exit 0
           fi
           bash .agents/scripts/init.sh

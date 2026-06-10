@@ -12,6 +12,8 @@ Claude Code discovers them via the `.claude/skills` symlink.
 
 - Task will recur (release, deploy, codegen, data migration, report).
 - Task has non-obvious steps or ordering that cost effort to figure out.
+- You (the agent) just did such a task — create the skill now, unprompted.
+  The session-handoff playbook has a skill sweep step for exactly this.
 
 Don't create for one-offs or things AGENTS.md already covers in 2 lines.
 
@@ -40,6 +42,8 @@ Constraints, failure modes, what NOT to do.
 2. Write `SKILL.md` per format above.
 3. Helper scripts → same dir, reference by path.
 4. Mention the skill in AGENTS.md only if it gates the core workflow.
+5. Check discovery: `bash .agents/scripts/init.sh` — new skill must appear in
+   the skills index with a sensible description.
 
 ## Quality bar
 
