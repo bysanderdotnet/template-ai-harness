@@ -18,8 +18,9 @@ Subcommands (details + examples: ./AGENTS.sh help <command>):
     run          run one registered command by name
     check        structure/state validation only
     ci           what CI runs: check, then init + verify once setup complete
-    automate     run template automations (auto-merge-pr, auto-create-pr)
-    settings     configure template automations (auto-merge-pr, auto-create-pr)
+    github       GitHub-only automations (auto-merge-pr, auto-create-pr):
+                 `github settings` configures, `github automate` runs
+                 (running works only inside GitHub Actions runners)
 
 Stdlib only; Python 3.8+. Durable state: .agents/agents.json; scratch:
 .agents/agents.scratch.json (gitignored). Both owned by this script — never
@@ -103,16 +104,18 @@ def tip(msg):
 
 def default_settings():
     return {
-        "auto_merge_pr": {
-            "enabled": False,
-            "notify_on_blocked": False,
-            "notify_tags": [],
-        },
-        "auto_create_pr": {
-            "enabled": False,
-            "webhook_url": DEFAULT_AUTO_CREATE_PR_URL,
-            "repository": "",
-            "token_env": DEFAULT_AUTO_CREATE_PR_TOKEN_ENV,
+        "github": {
+            "auto_merge_pr": {
+                "enabled": False,
+                "notify_on_blocked": False,
+                "notify_tags": [],
+            },
+            "auto_create_pr": {
+                "enabled": False,
+                "webhook_url": DEFAULT_AUTO_CREATE_PR_URL,
+                "repository": "",
+                "token_env": DEFAULT_AUTO_CREATE_PR_TOKEN_ENV,
+            },
         },
     }
 
@@ -140,9 +143,12 @@ def section_error(cfg):
     if any(not isinstance(v, dict) for v in (cfg.get("commands") or {}).values()):
         return "'commands' entries must be JSON objects"
     settings = cfg.get("settings") or {}
+    if "github" in settings and not isinstance(settings["github"], dict):
+        return "'settings.github' must be a JSON object"
+    github = settings.get("github") or {}
     for key in ("auto_merge_pr", "auto_create_pr"):
-        if key in settings and not isinstance(settings[key], dict):
-            return f"'settings.{key}' must be a JSON object"
+        if key in github and not isinstance(github[key], dict):
+            return f"'settings.github.{key}' must be a JSON object"
     return None
 
 
@@ -168,11 +174,12 @@ def load_config():
                          ("progress", []), ("rules", []),
                          ("settings", default_settings())):
         cfg.setdefault(key, default)
-    merge = cfg["settings"].setdefault("auto_merge_pr", {})
+    github = cfg["settings"].setdefault("github", {})
+    merge = github.setdefault("auto_merge_pr", {})
     merge.setdefault("enabled", False)
     merge.setdefault("notify_on_blocked", False)
     merge.setdefault("notify_tags", [])
-    create = cfg["settings"].setdefault("auto_create_pr", {})
+    create = github.setdefault("auto_create_pr", {})
     create.setdefault("enabled", False)
     create.setdefault("webhook_url", DEFAULT_AUTO_CREATE_PR_URL)
     create.setdefault("repository", "")
@@ -242,7 +249,8 @@ def detect_repository_slug():
 def setup_automation_defaults(cfg):
     """Set first-setup-only automation defaults. Runs when setup finalizes —
     not on every init — so an unconfigured template checkout stays pristine."""
-    create = cfg["settings"].setdefault("auto_create_pr", {})
+    github = cfg["settings"].setdefault("github", {})
+    create = github.setdefault("auto_create_pr", {})
     changed = False
     if not create.get("webhook_url"):
         create["webhook_url"] = DEFAULT_AUTO_CREATE_PR_URL
@@ -1284,6 +1292,11 @@ def cmd_run(args):
     sys.exit(subprocess.run(c["run"], shell=True, cwd=ROOT).returncode)
 
 
+def github_runner_note():
+    print("note: GitHub automations execute only inside GitHub Actions runners; "
+          "settings can be configured anywhere.")
+
+
 def render_settings(settings):
     merge = settings["auto_merge_pr"]
     create = settings["auto_create_pr"]
@@ -1300,8 +1313,9 @@ def render_settings(settings):
 
 
 def cmd_settings(args):
+    github_runner_note()
     cfg = load_config()
-    settings = cfg["settings"]
+    settings = cfg["settings"]["github"]
 
     if args.area == "show":
         render_settings(settings)
@@ -1353,7 +1367,7 @@ PENDING_CHECK_STATUSES = {"queued", "requested", "waiting", "pending", "in_progr
 
 
 def setting(cfg, section):
-    return cfg.get("settings", {}).get(section, {})
+    return cfg.get("settings", {}).get("github", {}).get(section, {})
 
 
 def gh_proc(args):
@@ -1459,9 +1473,10 @@ def ensure_comment(repo, number, body):
 
 
 def cmd_automate(args):
+    github_runner_note()
     if args.action == "auto-merge-pr":
         if not args.repo:
-            die("automate auto-merge-pr needs --repo org/repo")
+            die("github automate auto-merge-pr needs --repo org/repo")
         automate_auto_merge_pr(args)
     elif args.action == "auto-create-pr":
         automate_auto_create_pr(args)
@@ -1581,8 +1596,8 @@ which command when:
   learned a durable fact {SCRIPT} docs add <category> "<rule>"
   blocked                {SCRIPT} log "<title>" --done "..." --blockers "..."   then ask user
   asked to do upkeep     {SCRIPT} maintenance
-  template automation    {SCRIPT} settings show
-  run automation         {SCRIPT} automate auto-merge-pr --repo org/repo
+  github automation      {SCRIPT} github settings show
+  run automation         {SCRIPT} github automate auto-merge-pr --repo org/repo
 
 Every command prints a `next:` hint — follow it. State lives in
 .agents/agents.json, owned by this script: manage through these
@@ -1700,29 +1715,46 @@ re-running set on an existing name keeps its flags/desc; clear with cmd rm.""")
     add("check", cmd_check, "structure/state validation only (no setup gate)")
     add("ci", cmd_ci, "what CI runs: check, then init + verify once setup complete")
 
-    au = add("automate", cmd_automate,
-             "run template automations used by GitHub Actions",
-             epilog=f"""\
+    gh = sub.add_parser(
+        "github",
+        help="GitHub-only automations (auto-merge-pr, auto-create-pr); "
+             "running them works only inside GitHub Actions runners",
+        description="GitHub-only automations (auto-merge-pr, auto-create-pr); "
+                    "settings can be configured anywhere, but `github automate` "
+                    "works only inside GitHub Actions runners",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    ghsub = gh.add_subparsers(dest="github_command", required=True,
+                              metavar="<command>")
+
+    def gh_add(name, fn, help_, epilog=None):
+        sp = ghsub.add_parser(name, help=help_, description=help_, epilog=epilog,
+                              formatter_class=argparse.RawDescriptionHelpFormatter)
+        sp.set_defaults(fn=fn)
+        return sp
+
+    au = gh_add("automate", cmd_automate,
+                "run GitHub automations (GitHub Actions runners only)",
+                epilog=f"""\
 examples:
-  {SCRIPT} automate auto-merge-pr --repo org/repo
-  {SCRIPT} automate auto-create-pr --has-open-prs false""")
+  {SCRIPT} github automate auto-merge-pr --repo org/repo
+  {SCRIPT} github automate auto-create-pr --has-open-prs false""")
     au.add_argument("action", choices=["auto-merge-pr", "auto-create-pr"],
                     help="automation to run")
     au.add_argument("--repo", help="auto-merge-pr: GitHub repository, org/name")
     au.add_argument("--has-open-prs", choices=["true", "false"],
                     default="true", help="auto-create-pr: output from auto-merge-pr")
 
-    st = add("settings", cmd_settings,
-             "configure template automations: auto-merge-pr and auto-create-pr",
-             epilog=f"""\
+    st = gh_add("settings", cmd_settings,
+                "configure GitHub automations: auto-merge-pr and auto-create-pr",
+                epilog=f"""\
 examples:
-  {SCRIPT} settings show
-  {SCRIPT} settings auto-merge-pr --on
-  {SCRIPT} settings auto-merge-pr --notify-on --tags "@jules @codex"
-  {SCRIPT} settings auto-create-pr --repo "org/repo" --on
-  {SCRIPT} settings auto-create-pr --url "https://example.com/?myparam={{r}}"
-  {SCRIPT} settings auto-create-pr --token-env "MY_TOKEN_VAR"
-  {SCRIPT} settings auto-create-pr --off
+  {SCRIPT} github settings show
+  {SCRIPT} github settings auto-merge-pr --on
+  {SCRIPT} github settings auto-merge-pr --notify-on --tags "@jules @codex"
+  {SCRIPT} github settings auto-create-pr --repo "org/repo" --on
+  {SCRIPT} github settings auto-create-pr --url "https://example.com/?myparam={{r}}"
+  {SCRIPT} github settings auto-create-pr --token-env "MY_TOKEN_VAR"
+  {SCRIPT} github settings auto-create-pr --off
 defaults: both off; blocked-PR messages off; no tags; auto-create URL preset; repo detected during setup when possible; bearer token read from $AUTO_MERGE_PR.""")
     st.add_argument("area", choices=["show", "auto-merge-pr", "auto-create-pr"],
                     help="settings group")
