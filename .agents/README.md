@@ -12,7 +12,7 @@ not inspect or edit this directory directly; use the root wrapper instead:
 | `agents.py` | Harness CLI implementation — guided setup, sessions, verification, project docs, state | Called through `../AGENTS.sh`; edit rarely (register commands instead) |
 | `agents.json` | All durable state: setup progress, registered commands, features, progress log, rules | Via the CLI (`init`, `cmd`, `feature`, `log`, `docs`), never hand-edit |
 | `agents.scratch.json` | Transient scratch (last verify result) | Gitignored; written by `./AGENTS.sh verify` |
-| `skills/` | Task playbooks (`<name>/SKILL.md`) | Add one per recurring task (`skills/new-skill/SKILL.md`) |
+| `skills/` | Task playbooks (`<name>/SKILL.md`) | Scaffold via `../AGENTS.sh skill new <name>`; how-to in `skills/new-skill/SKILL.md` |
 
 `AGENTS.sh` is the stable public interface. It finds Python and forwards to
 `agents.py`, which is deliberately a guide, not just a runner: `init` walks
