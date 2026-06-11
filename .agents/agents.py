@@ -103,13 +103,17 @@ def tip(msg):
 def load_config():
     """All durable harness state. Top-level keys are independent sections so
     future harness versions can add more without migrations."""
+    if not os.path.isfile(CONFIG_PATH):
+        die(".agents/agents.json missing. "
+            "Restore from git history or re-copy from the template — never hand-edit.")
     try:
         cfg = load_json(CONFIG_PATH, default=None)
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
         die(f".agents/agents.json not valid JSON: {e}. "
             "Restore from git history — never hand-edit.")
-    if cfg is None:
-        cfg = {}
+    if not isinstance(cfg, dict):
+        die(".agents/agents.json is not a JSON object. "
+            "Restore from git history — never hand-edit.")
     for key, default in (("commands", {}), ("features", []),
                          ("progress", []), ("rules", [])):
         cfg.setdefault(key, default)
@@ -122,9 +126,10 @@ def save_config(cfg):
 
 def load_scratch():
     try:
-        return load_json(SCRATCH_PATH, default=None) or {}
+        data = load_json(SCRATCH_PATH, default=None)
     except (json.JSONDecodeError, UnicodeDecodeError):
         return {}  # scratch is disposable; a corrupt one is treated as absent
+    return data if isinstance(data, dict) else {}
 
 
 def save_scratch(data):
@@ -248,8 +253,10 @@ def _check_project():
     section = m.group(1)
     if SETUP_MARKER in section:
         return False, f"AGENTS.md '## Project' still contains {SETUP_MARKER}"
-    if not re.search(r"^- (Name|Stack|Purpose):\s*\S", section, re.M):
-        return False, "AGENTS.md '## Project' fields look empty"
+    empty = [field for field in ("Name", "Stack", "Purpose")
+             if not re.search(rf"^- {field}:[ \t]*\S", section, re.M)]
+    if empty:
+        return False, "AGENTS.md '## Project' fields empty: " + ", ".join(empty)
     return True, "AGENTS.md project section filled"
 
 
@@ -740,8 +747,9 @@ def cmd_handoff(_args):
           "changes → tell user (CI human-owned, never edit)")
     if todo:
         print(f"== handoff incomplete: {todo} item(s) open above ==")
-    else:
-        print("== handoff clean: next session resumes from init output alone ==")
+        tip(f"close the open items, then rerun: {SCRIPT} handoff")
+        sys.exit(1)
+    print("== handoff clean: next session resumes from init output alone ==")
 
 
 # ---------- feature ----------
@@ -782,6 +790,8 @@ def cmd_feature(args):
             nums = [int(m.group(1)) for f in feats
                     for m in [re.match(r"F-(\d+)$", f.get("id", ""))] if m]
             fid = f"F-{(max(nums) + 1 if nums else 1):03d}"
+        elif not re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]*$", fid):
+            die("feature id must be letters/digits/dashes/underscores, e.g. F-001")
         if find_feature(feats, fid):
             die(f"feature id '{fid}' already exists")
         f = {"id": fid, "title": args.title, "status": "todo"}
