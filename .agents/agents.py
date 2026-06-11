@@ -55,6 +55,7 @@ SKILLS_DIR = os.path.join(ROOT, ".agents", "skills")
 
 PROGRESS_DEFAULT_SHOWN = 5   # entries shown by `progress` / referenced by `init`
 DEFAULT_AUTO_CREATE_PR_URL = "https://auto-create-pr.bysander.net/?repo={r}"
+DEFAULT_AUTO_CREATE_PR_TOKEN_ENV = "AUTO_MERGE_PR"
 RULE_CATEGORIES = ("architecture", "conventions", "testing")
 RULES_SOFT_CAP = 12          # per category; above this, maintenance says combine/prune
 RULE_STALE_DAYS = 90         # rules older than this get flagged for a re-check
@@ -111,6 +112,7 @@ def default_settings():
             "enabled": False,
             "webhook_url": DEFAULT_AUTO_CREATE_PR_URL,
             "repository": "",
+            "token_env": DEFAULT_AUTO_CREATE_PR_TOKEN_ENV,
         },
     }
 
@@ -174,6 +176,7 @@ def load_config():
     create.setdefault("enabled", False)
     create.setdefault("webhook_url", DEFAULT_AUTO_CREATE_PR_URL)
     create.setdefault("repository", "")
+    create.setdefault("token_env", DEFAULT_AUTO_CREATE_PR_TOKEN_ENV)
     return cfg
 
 
@@ -1293,6 +1296,7 @@ def render_settings(settings):
     print(f"  enabled: {create.get('enabled', False)}")
     print(f"  webhook_url: {create.get('webhook_url') or '(empty)'}")
     print(f"  repository: {create.get('repository') or '(empty)'}")
+    print(f"  token_env: {create.get('token_env') or '(empty)'}")
 
 
 def cmd_settings(args):
@@ -1323,11 +1327,14 @@ def cmd_settings(args):
         enabled = setting_enabled(args.on, args.off, create.get("enabled", False))
         webhook_url = args.url if args.url is not None else create.get("webhook_url", "")
         repository = args.repo if args.repo is not None else create.get("repository", "")
+        token_env = (args.token_env if args.token_env is not None
+                     else create.get("token_env", DEFAULT_AUTO_CREATE_PR_TOKEN_ENV))
         if enabled and (not webhook_url or not repository):
             die("auto-create-pr needs --url and --repo before --on")
         create["enabled"] = enabled
         create["webhook_url"] = webhook_url
         create["repository"] = repository
+        create["token_env"] = token_env
         save_config(cfg)
         render_settings(settings)
         return
@@ -1511,10 +1518,13 @@ def automate_auto_merge_pr(args):
     print(f"open_prs_remaining={len(remaining)}")
 
 
-def call_webhook(url, repo):
+def call_webhook(url, repo, token):
     encoded = quote(repo, safe="")
     final_url = url.replace("{r}", encoded).replace("{repo}", encoded)
-    req = Request(final_url, headers={"User-Agent": "template-ai-harness"})
+    req = Request(final_url, method="POST", headers={
+        "User-Agent": "template-ai-harness",
+        "Authorization": f"Bearer {token}",
+    })
     try:
         with urlopen(req, timeout=30) as resp:
             print(f"webhook_status={resp.status}")
@@ -1539,13 +1549,20 @@ def automate_auto_create_pr(args):
         print("auto-create-pr needs webhook_url and repository; not calling URL")
         return
 
+    token_env = cfg_set.get("token_env", DEFAULT_AUTO_CREATE_PR_TOKEN_ENV)
+    token = os.environ.get(token_env, "") if token_env else ""
+    if not token:
+        print(f"auto-create-pr needs bearer token in ${token_env or '(unset token_env)'}; "
+              "not calling URL")
+        return
+
     open_features = [f for f in cfg.get("features", []) if f.get("status") != "done"]
     if not open_features:
         print("no open features; auto-create-pr stopped")
         return
 
     print(f"open_features={len(open_features)}")
-    call_webhook(url, repo)
+    call_webhook(url, repo, token)
 
 
 # ---------- argument parsing ----------
@@ -1704,8 +1721,9 @@ examples:
   {SCRIPT} settings auto-merge-pr --notify-on --tags "@jules @codex"
   {SCRIPT} settings auto-create-pr --repo "org/repo" --on
   {SCRIPT} settings auto-create-pr --url "https://example.com/?myparam={{r}}"
+  {SCRIPT} settings auto-create-pr --token-env "MY_TOKEN_VAR"
   {SCRIPT} settings auto-create-pr --off
-defaults: both off; blocked-PR messages off; no tags; auto-create URL preset; repo detected during setup when possible.""")
+defaults: both off; blocked-PR messages off; no tags; auto-create URL preset; repo detected during setup when possible; bearer token read from $AUTO_MERGE_PR.""")
     st.add_argument("area", choices=["show", "auto-merge-pr", "auto-create-pr"],
                     help="settings group")
     st.add_argument("--on", action="store_true", help="enable this automation")
@@ -1717,6 +1735,8 @@ defaults: both off; blocked-PR messages off; no tags; auto-create URL preset; re
     st.add_argument("--tags", help="auto-merge-pr: space-separated tags for comments")
     st.add_argument("--url", help="auto-create-pr: webhook URL; use {r} for org/repo")
     st.add_argument("--repo", help="auto-create-pr: org/repo passed to webhook")
+    st.add_argument("--token-env", dest="token_env",
+                    help="auto-create-pr: env var holding the webhook bearer token")
 
     hp = add("help", lambda a: p.parse_args(([a.topic] if a.topic else []) + ["--help"]),
              "show usage; `help <command>` for one command's details")
