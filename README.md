@@ -61,7 +61,7 @@ tells the agent what to do next at every step.
 | `docs` | Live project docs: a repo map generated from `git ls-files` (never drifts) + curated rules for architecture, conventions, and testing |
 | `maintenance` | Upkeep sweep: flags rule categories to combine/prune, stale rules, blocked features, skills and commands to re-check |
 | `cmd set/rm/list`, `run` | Command registry: agents register build/test/lint/dev commands instead of editing harness scripts |
-| `feature list/add/start/done/block` | Scope tracking; enforces one feature in progress |
+| `feature list/add/start/done/block/note` | Scope tracking; enforces one feature in progress |
 | `log`, `progress` | Session log: entries auto-stamped with date, commit, and last verify result |
 | `check`, `ci` | Structure validation / the single call CI makes |
 
