@@ -97,9 +97,12 @@ repo has no CI, it only checks merge conflicts. Failed CI or conflicts can get a
 PR comment with configured agent tags. Pending CI waits for the next run.
 
 `auto-create-pr` runs after `auto-merge-pr`. If PRs remain open, it stops. If no
-PRs remain and `.agents/agents.json` still has open features, it calls the
+PRs remain and `.agents/agents.json` still has open features, it POSTs to the
 configured webhook URL with `{r}` / `{repo}` replaced by the configured
-repository.
+repository, sending `Authorization: Bearer <token>`. The token is read from the
+environment variable named by the `token_env` setting (default `AUTO_MERGE_PR`,
+change via `./AGENTS.sh settings auto-create-pr --token-env NAME`); if that
+variable is empty the webhook call is skipped.
 
 ## Project docs that don't rot
 
