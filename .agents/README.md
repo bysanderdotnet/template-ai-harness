@@ -12,6 +12,7 @@ not inspect or edit this directory directly; use the root wrapper instead:
 | `agents.py` | Harness CLI implementation — guided setup, sessions, verification, project docs, state | Called through `../AGENTS.sh`; edit rarely (register commands instead) |
 | `agents.json` | All durable state: setup progress, registered commands, features, progress log, rules | Via the CLI (`init`, `cmd`, `feature`, `log`, `docs`), never hand-edit |
 | `agents.scratch.json` | Transient scratch (last verify result) | Gitignored; written by `./AGENTS.sh verify` |
+| `agents.json.lock` | Cross-session advisory lock (POSIX only) | Gitignored; held while the CLI runs |
 | `skills/` | Task playbooks (`<name>/SKILL.md`) | Scaffold via `../AGENTS.sh skill new <name>`; how-to in `skills/new-skill/SKILL.md` |
 
 `AGENTS.sh` is the stable public interface. It finds Python and forwards to
@@ -28,6 +29,14 @@ the session is safely closeable. Subcommand details live in
 `CLAUDE.md` and `GEMINI.md` are symlinks, Codex reads `AGENTS.md` natively,
 and `.github/copilot-instructions.md` points Copilot at it.
 `.claude/skills` symlinks to `skills/` so Claude Code auto-discovers them.
+
+Known limitation — Windows: those entrypoints are git symlinks. On a Windows
+checkout without symlink support they materialize as plain text files and
+`./AGENTS.sh check` FAILs on them. Enable Developer Mode (or run git
+elevated) and clone with `git clone -c core.symlinks=true <url>`; an existing
+checkout can be repaired with `git config core.symlinks true` +
+`git checkout -- CLAUDE.md GEMINI.md .claude/skills`. The cross-session state
+lock (`agents.json.lock`) is also POSIX-only and skipped on Windows.
 `.claude/settings.json` wires a SessionStart hook that auto-runs
 `./AGENTS.sh init`. `.github/workflows/agents.yml` runs `./AGENTS.sh ci` —
 same gates, enforced remotely.

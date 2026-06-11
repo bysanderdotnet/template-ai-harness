@@ -35,6 +35,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 
 SCRIPT = "./AGENTS.sh"
@@ -59,6 +60,9 @@ RULES_SOFT_CAP = 12          # per category; above this, maintenance says combin
 RULE_STALE_DAYS = 90         # rules older than this get flagged for a re-check
 TREE_MAX_DEPTH = 3           # repo map: directories deeper than this are collapsed
 TREE_MAX_ENTRIES = 12        # repo map: entries shown per directory
+VERIFY_SLOW_SECS = 60        # verify steps slower than this get flagged by maintenance
+SKILL_BODY_MAX_LINES = 80    # quality bar from skills/new-skill/SKILL.md, checked by `skill lint`
+LOCK_WAIT_SECS = 5           # how long to wait for another session's state lock
 
 
 # ---------- small helpers ----------
@@ -99,6 +103,34 @@ def tip(msg):
 
 # ---------- state (single file: agents.json; scratch: agents.scratch.json) ----------
 
+_LOCK_FH = None  # kept open for the process lifetime; OS releases on exit
+
+
+def acquire_state_lock():
+    """agents.json updates are read-modify-write: two parallel sessions would
+    silently lose each other's writes. Exclusive advisory lock, taken on first
+    state load and held until the process exits. POSIX only (like the exe
+    checks); elsewhere this is a no-op."""
+    global _LOCK_FH
+    if _LOCK_FH is not None or os.name != "posix":
+        return
+    import fcntl
+    lock_path = CONFIG_PATH + ".lock"
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    fh = open(lock_path, "w")
+    deadline = time.monotonic() + LOCK_WAIT_SECS
+    while True:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _LOCK_FH = fh
+            return
+        except OSError:
+            if time.monotonic() >= deadline:
+                fh.close()
+                die(f"another {SCRIPT} process holds {lock_path} — "
+                    "wait for it to finish (stale after a crash: remove the file)")
+            time.sleep(0.2)
+
 def section_error(cfg):
     """Wrong-typed sections (hand-edit damage); None when the shape is sane."""
     for key, typ in (("setup", dict), ("commands", dict), ("features", list),
@@ -120,6 +152,7 @@ def section_error(cfg):
 def load_config():
     """All durable harness state. Top-level keys are independent sections so
     future harness versions can add more without migrations."""
+    acquire_state_lock()
     if not os.path.isfile(CONFIG_PATH):
         die(".agents/agents.json missing. "
             "Restore from git history or re-copy from the template — never hand-edit.")
@@ -217,7 +250,8 @@ def collect_problems():
 
     def need_link(rel):
         if not os.path.islink(os.path.join(ROOT, rel)):
-            fails.append(f"{rel} symlink missing")
+            fails.append(f"{rel} symlink missing (Windows checkout? re-clone with "
+                         "-c core.symlinks=true — see .agents/README.md)")
 
     need_file("AGENTS.md")
     need_link("CLAUDE.md")
@@ -463,13 +497,25 @@ def setup_finalize(cfg):
     tip("commit everything: git commit -m 'chore: complete project setup'; push if expected")
 
 
-def setup_flow(cfg, mark_step=None, force=False):
+def setup_flow(cfg, mark_step=None, force=False, unmark_step=None):
     """Guided setup, driven by init while the project is unconfigured.
     Exits 1 while steps remain; returns once setup finalizes so init can
     continue into a normal session."""
     state = cfg["setup"]
     state.setdefault("done", [])
     names = [n for n, *_ in SETUP_STEPS]
+
+    if unmark_step:
+        if unmark_step not in names:
+            die(f"unknown setup step '{unmark_step}'. Steps: {', '.join(names)}")
+        if unmark_step in state["done"]:
+            state["done"].remove(unmark_step)
+            save_config(cfg)
+            print(f"step '{unmark_step}' unmarked."
+                  + (" (auto-checked step: re-completes once its check passes)"
+                     if SETUP_STEPS[names.index(unmark_step)][3] else ""))
+        else:
+            print(f"step '{unmark_step}' was not marked done — nothing to undo.")
 
     if mark_step:
         if mark_step not in names:
@@ -549,17 +595,21 @@ def cmd_init(args):
         print("structure OK")
 
     in_setup = setup_pending(cfg) is not None
-    mark_step = None
-    if getattr(args, "action", None) == "done":
+    mark_step = unmark_step = None
+    action = getattr(args, "action", None)
+    if action in ("done", "undo"):
         if not in_setup:
-            print("note: setup already complete — 'init done' only applies during setup.")
+            print(f"note: setup already complete — 'init {action}' only applies during setup.")
         elif not getattr(args, "step", None):
-            die("init done needs a step name: "
+            die(f"init {action} needs a step name: "
                 + ", ".join(n for n, *_ in SETUP_STEPS))
-        else:
+        elif action == "done":
             mark_step = args.step
+        else:
+            unmark_step = args.step
     if in_setup:
-        setup_flow(cfg, mark_step=mark_step, force=getattr(args, "force", False))
+        setup_flow(cfg, mark_step=mark_step, force=getattr(args, "force", False),
+                   unmark_step=unmark_step)
         cfg = load_config()  # setup just finalized; continue into a normal session
 
     print("-- skills (playbooks; follow when task matches) --")
@@ -649,21 +699,28 @@ def cmd_init(args):
         tip(f"no open scope — agree next features with user: {SCRIPT} feature add \"<title>\"")
 
 
-def run_verify_steps(steps):
+def run_verify_steps(steps, keep_going=False):
     """Run verify-flagged commands in order; record + return overall result."""
-    failed = None
+    failures, timings = [], []
     for name, c in steps:
         print(f"-- {name}: {c['run']} --")
+        t0 = time.monotonic()
         rc = subprocess.run(c["run"], shell=True, cwd=ROOT).returncode
+        timings.append({"name": name, "secs": round(time.monotonic() - t0, 1),
+                        "ok": rc == 0})
         if rc != 0:
-            failed = f"{name} (exit {rc})"
-            print(f"FAIL: step '{name}' exited {rc}; remaining steps skipped.")
-            break
-    record_verify("fail" if failed else "pass", failed=failed)
-    return failed is None
+            failures.append(f"{name} (exit {rc})")
+            if not keep_going:
+                print(f"FAIL: step '{name}' exited {rc}; remaining steps skipped "
+                      "(run them all anyway: verify --keep-going).")
+                break
+            print(f"FAIL: step '{name}' exited {rc}; continuing (--keep-going).")
+    record_verify("fail" if failures else "pass",
+                  failed=", ".join(failures) or None, steps=timings)
+    return not failures
 
 
-def cmd_verify(_args):
+def cmd_verify(args):
     print("== verify: definition of done ==")
     cfg = load_config()
     if setup_pending(cfg) is not None:
@@ -677,7 +734,7 @@ def cmd_verify(_args):
         print(f'  {SCRIPT} cmd set test "npm test" --verify')
         record_verify("fail", failed="(no verify commands registered)")
         sys.exit(1)
-    if run_verify_steps(steps):
+    if run_verify_steps(steps, keep_going=getattr(args, "keep_going", False)):
         print(f"== verify OK: all {len(steps)} step(s) green ==")
         tip(f"{SCRIPT} handoff — log work, close feature, commit")
     else:
@@ -719,7 +776,7 @@ def tree_state():
     return hashlib.sha1("\n".join(lines).encode("utf-8")).hexdigest()
 
 
-def record_verify(result, failed=None):
+def record_verify(result, failed=None, steps=None):
     scratch = load_scratch()
     scratch["last_verify"] = {
         "result": result,
@@ -727,6 +784,7 @@ def record_verify(result, failed=None):
         "date": now_utc(),
         "head": git("rev-parse", "--short", "HEAD") or None,
         "tree": tree_state(),
+        "steps": steps or [],
     }
     save_scratch(scratch)
 
@@ -768,9 +826,33 @@ def verified_note():
 
 def cmd_log(args):
     cfg = load_config()
-    title = args.title.strip()
+
+    if args.amend:
+        if not cfg["progress"]:
+            die("log --amend: no progress entries yet")
+        entry = cfg["progress"][-1]
+        if args.title and args.title.strip():
+            entry["title"] = args.title.strip()
+        # only fields explicitly passed change; "" clears (render skips empties)
+        for key, val in (("done", args.done), ("issues", args.issues),
+                         ("next", args.next), ("blockers", args.blockers),
+                         ("verified", args.verified)):
+            if val is not None:
+                entry[key] = val
+        if args.feature:
+            if find_feature(cfg["features"], args.feature) is None:
+                print(f"WARN: feature '{args.feature}' not in feature list; amending anyway.")
+            entry["feature"] = args.feature
+        save_config(cfg)
+        print("Amended last entry:")
+        print(render_entry(entry))
+        return
+
+    title = (args.title or "").strip()
     if not title:
         die("log needs a non-empty title")
+    if args.done is None:
+        die('log needs --done "..." (what shipped)')
     entry = {
         "date": now_utc(),
         "title": title,
@@ -953,6 +1035,13 @@ def cmd_feature(args):
         return
 
     # remaining actions operate on an existing id
+    if not args.title and args.action == "start":
+        nxt = next((x for x in feats if x.get("status") == "todo"), None)
+        if nxt is None:
+            die("feature start: no id given and no todo features left "
+                "(see: feature list --all)")
+        print(f"no id given — starting first todo: {fmt_feature(nxt)}")
+        args.title = nxt["id"]
     if not args.title:
         die(f"feature {args.action} needs an id, e.g.: feature {args.action} F-00001")
     f = find_feature(feats, args.title)
@@ -993,7 +1082,15 @@ def cmd_feature(args):
             f["notes"] = args.notes
         else:
             die("feature note needs --notes \"text\" or --clear")
+    elif args.action == "edit":
+        new_title = (args.new_title or "").strip()
+        if not new_title:
+            die('feature edit needs --title "new title"')
+        f["title"] = new_title
     save_config(cfg)
+    if args.action == "edit":
+        print(f"Retitled: {fmt_feature(f)}")
+        return
     print(f"{f['id']} -> {f['status']}" + (f" ({f['notes']})" if f.get("notes") else ""))
     if args.action == "start":
         tip(f"implement {f['id']}; stay in scope. When finished: {SCRIPT} verify "
@@ -1130,6 +1227,59 @@ One line: goal of the playbook.
 """
 
 
+SCAFFOLD_TODO_RE = re.compile(r"^\s*(?:[-*]|\d+\.)\s+TODO\b")  # list item starting with TODO
+
+
+def skill_body_lines(md_path):
+    """SKILL.md lines after the frontmatter block (whole file if none)."""
+    try:
+        with open(md_path, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return []
+    if lines and lines[0].strip() == "---":
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                return lines[i + 1:]
+    return lines
+
+
+def skill_lint():
+    """Check every skill against the quality bar; True when all clean."""
+    rows = []
+    if os.path.isdir(SKILLS_DIR):
+        for name in sorted(os.listdir(SKILLS_DIR)):
+            if os.path.isdir(os.path.join(SKILLS_DIR, name)):
+                rows.append((name, os.path.join(SKILLS_DIR, name, "SKILL.md")))
+    if not rows:
+        print(f"No skills to lint. Scaffold one: {SCRIPT} skill new <name>")
+        return True
+    clean = True
+    for name, md in rows:
+        problems = []
+        if not os.path.isfile(md):
+            problems.append("no SKILL.md")
+        else:
+            desc = skill_description(md)
+            if not desc:
+                problems.append("missing 'description:' frontmatter")
+            elif desc.startswith("TODO"):
+                problems.append("description still the scaffold TODO")
+            body = skill_body_lines(md)
+            todos = sum(1 for l in body if SCAFFOLD_TODO_RE.search(l))
+            if todos:
+                problems.append(f"{todos} scaffold TODO item(s) left in body")
+            if len(body) > SKILL_BODY_MAX_LINES:
+                problems.append(f"body {len(body)} lines (bar: <=~{SKILL_BODY_MAX_LINES}) — "
+                                "split details into extra files in the skill dir")
+        if problems:
+            clean = False
+            print(f"  [..] {name}: " + "; ".join(problems))
+        else:
+            print(f"  [ok] {name}")
+    return clean
+
+
 def cmd_skill(args):
     if args.action == "list":
         rows = list_skills()
@@ -1138,6 +1288,15 @@ def cmd_skill(args):
             return
         for name, desc in rows:
             print(f"  {name}: {desc}")
+        return
+
+    if args.action == "lint":
+        if skill_lint():
+            print("== skill lint OK ==")
+        else:
+            print("== skill lint: fix items above (quality bar: "
+                  ".agents/skills/new-skill/SKILL.md) ==")
+            sys.exit(1)
         return
 
     # new
@@ -1231,14 +1390,24 @@ def cmd_maintenance(_args):
     print("-- skills --")
     skills = list_skills()
     if skills:
-        item(False, "skills", f"{len(skills)} skill(s) — reread each SKILL.md: commands still "
-                              "exist? steps still match the code? Fix or delete drifted ones")
+        item(False, "skills", f"{len(skills)} skill(s) — run {SCRIPT} skill lint, then reread "
+                              "each SKILL.md: commands still exist? steps still match the "
+                              "code? Fix or delete drifted ones")
     else:
         item(True, "skills", "none to review")
 
     print("-- commands / CI --")
     ok, detail = _check_commands()
     item(ok, "verify commands", detail)
+    timings = (load_scratch().get("last_verify") or {}).get("steps") or []
+    slow = [s for s in timings if (s.get("secs") or 0) > VERIFY_SLOW_SECS]
+    if slow:
+        item(False, "slow verify", ", ".join(f"{s.get('name')} {s.get('secs')}s" for s in slow)
+                                   + f" (cap {VERIFY_SLOW_SECS}s) — keep cheap checks first "
+                                   f"({SCRIPT} cmd move <name> --before <other>); split or cache slow ones")
+    elif timings:
+        item(True, "slow verify", f"slowest step {max(s.get('secs') or 0 for s in timings)}s "
+                                  f"(cap {VERIFY_SLOW_SECS}s)")
     wf = os.path.join(ROOT, ".github", "workflows", "agents.yml")
     try:
         with open(wf, encoding="utf-8") as fh:
@@ -1290,6 +1459,26 @@ def cmd_cmd(args):
         del cmds[args.name]
         save_config(cfg)
         print(f"Removed '{args.name}'.")
+        return
+
+    if args.action == "move":
+        if args.name not in cmds:
+            die(f"no command named '{args.name}'")
+        if bool(args.before) == bool(args.after):
+            die("cmd move: pass exactly one of --before <name> / --after <name>")
+        anchor = args.before or args.after
+        if anchor == args.name:
+            die("cmd move: command and anchor are the same")
+        if anchor not in cmds:
+            die(f"no command named '{anchor}'")
+        entry = cmds.pop(args.name)
+        items = list(cmds.items())
+        idx = list(cmds).index(anchor) + (0 if args.before else 1)
+        items.insert(idx, (args.name, entry))
+        cfg["commands"] = dict(items)
+        save_config(cfg)
+        print("New order: " + ", ".join(cfg["commands"]))
+        print("[verify] steps run in this order — cheap/fast checks first.")
         return
 
     # set
@@ -1377,15 +1566,18 @@ First runs: init enters SETUP MODE, guides configuration one step at a time.
 Steps with an automatic check complete themselves on rerun; manual steps are
 recorded with: {SCRIPT} init done <step>. Rerun init after each step; once
 setup completes, init reports state and the next action.""")
-    ini.add_argument("action", nargs="?", choices=["done"],
-                     help="'done' — record a manual setup step as finished")
-    ini.add_argument("step", nargs="?", help="setup step name (for 'done')")
+    ini.add_argument("action", nargs="?", choices=["done", "undo"],
+                     help="'done' — record a manual setup step as finished; "
+                          "'undo' — unrecord a step marked by mistake")
+    ini.add_argument("step", nargs="?", help="setup step name (for 'done'/'undo')")
     ini.add_argument("--force", action="store_true",
                      help="record the step even if its automatic check fails")
 
-    add("verify", cmd_verify,
-        "run the registered definition of done (commands flagged --verify, in order); "
-        "records the result so `log` can report it")
+    vf = add("verify", cmd_verify,
+             "run the registered definition of done (commands flagged --verify, in order); "
+             "records the result so `log` can report it")
+    vf.add_argument("--keep-going", action="store_true",
+                    help="don't stop at the first red step; report all failures")
 
     add("handoff", cmd_handoff,
         "end-of-session checklist with live status: verify, log, feature state, commit, push")
@@ -1393,13 +1585,17 @@ setup completes, init reports state and the next action.""")
     lg = add("log", cmd_log,
              "record a progress entry; date, commit, and verify status are stamped automatically",
              epilog=f"""\
-example:
+examples:
   {SCRIPT} log "auth feature" --done "JWT login in src/auth/" \\
       --issues "refresh tokens untested" --next "wire logout" --feature F-00002
+  {SCRIPT} log --amend --done "JWT login + logout in src/auth/"
+--amend fixes the LAST entry: only the fields you pass change ("" clears one).
 Terse caveman style (AGENTS.md '## Style'). Storage/history handled for you;
 nothing to compact or archive.""")
-    lg.add_argument("title", help="short entry title")
-    lg.add_argument("--done", required=True, help="what shipped (paths, behavior)")
+    lg.add_argument("title", nargs="?", help="short entry title (optional with --amend)")
+    lg.add_argument("--done", help="what shipped (paths, behavior); required unless --amend")
+    lg.add_argument("--amend", action="store_true",
+                    help="update the last entry instead of appending (typo/forgot a field)")
     lg.add_argument("--issues", help="broken/known issues: facts, exact errors")
     lg.add_argument("--next", help="single most useful next step")
     lg.add_argument("--blockers", help="what stops progress (default: none)")
@@ -1418,14 +1614,17 @@ nothing to compact or archive.""")
 examples:
   {SCRIPT} feature list
   {SCRIPT} feature add "rate limiting" --notes "per-IP, 100 req/min"
+  {SCRIPT} feature start                    no id = first todo
   {SCRIPT} feature start F-00003
   {SCRIPT} feature done F-00003
   {SCRIPT} feature block F-00004 --notes "waiting on API key"
   {SCRIPT} feature note F-00004 --clear
+  {SCRIPT} feature edit F-00003 --title "rate limiting (per-IP)"
 """)
-    ft.add_argument("action", choices=["list", "add", "start", "done", "block", "note"])
+    ft.add_argument("action", choices=["list", "add", "start", "done", "block", "note", "edit"])
     ft.add_argument("title", nargs="?", help="title (for add) or feature id (for the rest)")
     ft.add_argument("--id", help="explicit id for add (default: next F-NNNNN)")
+    ft.add_argument("--title", dest="new_title", help="edit: replacement title")
     ft.add_argument("--notes", help="notes text (add/block/note)")
     ft.add_argument("--clear", action="store_true", help="note: remove the feature's note")
     ft.add_argument("--all", action="store_true", help="list: include done features")
@@ -1453,8 +1652,9 @@ part: one terse fact each, added when learned, pruned when stale
 examples:
   {SCRIPT} skill new release-deploy     scaffold, then fill every TODO
   {SCRIPT} skill list
+  {SCRIPT} skill lint                   quality bar: TODOs gone, body <=~{SKILL_BODY_MAX_LINES} lines
 Quality bar + format details: .agents/skills/new-skill/SKILL.md.""")
-    sk.add_argument("action", choices=["new", "list"])
+    sk.add_argument("action", choices=["new", "list", "lint"])
     sk.add_argument("name", nargs="?", help="kebab-case skill name (for new)")
 
     add("maintenance", cmd_maintenance,
@@ -1468,13 +1668,17 @@ examples:
   {SCRIPT} cmd set lint "npm run lint" --verify     part of the definition of done
   {SCRIPT} cmd set deps "npm ci" --init             session-start smoke check
   {SCRIPT} cmd set dev "npm run dev"                on-demand helper (use: run dev)
+  {SCRIPT} cmd move lint --before test              reorder without rm + re-add
   {SCRIPT} cmd rm lint
-verify steps run in listed order — register cheap/fast checks first.
+verify steps run in listed order — register cheap/fast checks first
+(reorder later: cmd move <name> --before/--after <other>).
 re-running set on an existing name keeps its flags/desc and its position in
 the order; clear flags with --no-verify / --no-init, the desc with --desc "".""")
-    cm.add_argument("action", choices=["set", "rm", "list"])
+    cm.add_argument("action", choices=["set", "rm", "list", "move"])
     cm.add_argument("name", nargs="?", help="command name, e.g. test")
     cm.add_argument("command", nargs="?", help="shell command, e.g. \"npm test\"")
+    cm.add_argument("--before", help="move: place before this command")
+    cm.add_argument("--after", help="move: place after this command")
     cm.add_argument("--verify", action="store_true",
                     help="part of the definition of done (run by `verify`)")
     cm.add_argument("--no-verify", action="store_true",
