@@ -200,10 +200,12 @@ def collect_problems():
             cfg = load_json(CONFIG_PATH)
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             fails.append(f".agents/agents.json is not valid JSON: {e}")
-    if isinstance(cfg, dict) and section_error(cfg):
-        fails.append(f".agents/agents.json invalid: {section_error(cfg)} — "
-                     "restore from git history, never hand-edit")
-        cfg = None
+    if isinstance(cfg, dict):
+        err = section_error(cfg)
+        if err:
+            fails.append(f".agents/agents.json invalid: {err} — "
+                         "restore from git history, never hand-edit")
+            cfg = None
     if isinstance(cfg, dict):
         wip = [f for f in cfg.get("features", []) if f.get("status") == "in_progress"]
         if len(wip) > 1:
@@ -273,7 +275,8 @@ def _check_project():
             text = fh.read()
     except OSError:
         return False, "AGENTS.md unreadable"
-    m = re.search(r"^## Project\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+    # \r?\n: CRLF checkouts (e.g. Windows autocrlf) must not fail the check
+    m = re.search(r"^## Project[ \t]*\r?\n(.*?)(?=^## |\Z)", text, re.M | re.S)
     if not m:
         return False, "AGENTS.md has no '## Project' section"
     section = m.group(1)
@@ -793,12 +796,19 @@ def cmd_handoff(_args):
     entries = cfg["progress"]
     today = now_utc()[:10]
     latest = entries[-1] if entries else None
-    if latest and latest.get("date", "").startswith(today):
-        item(True, "log", f"entry recorded today: \"{latest.get('title')}\"")
-    else:
+    latest_date = latest.get("date", "") if latest else ""
+    if not latest_date.startswith(today):
         item(False, "log", f"no entry for this session — run: {SCRIPT} log \"<title>\" "
                            "--done \"...\" --next \"...\" (caveman style; cover shipped, "
                            "known issues, next step, blockers)")
+    elif lv and lv.get("result") == "pass" and (lv.get("date") or "") > latest_date:
+        # dates share one fixed-width format, so string compare is chronological;
+        # a same-day entry from an earlier session must not pass for this one
+        item(False, "log", f"latest entry (\"{latest.get('title')}\") predates the last "
+                           f"verify pass — log this session's work: {SCRIPT} log \"<title>\" "
+                           "--done \"...\"")
+    else:
+        item(True, "log", f"entry recorded today: \"{latest.get('title')}\"")
 
     wip = [f for f in cfg["features"] if f.get("status") == "in_progress"]
     if wip:
@@ -900,6 +910,9 @@ def cmd_feature(args):
                 f"Finish (feature done {wip[0].get('id')}) or block it first.")
         if f.get("status") == "done":
             print(f"WARN: {f['id']} was done — reopening.")
+        elif f.get("status") == "blocked":
+            print(f"WARN: {f['id']} was blocked ({f.get('notes') or 'no reason recorded'}) — "
+                  f"confirm resolved; note is stale: {SCRIPT} feature note {f['id']} --notes \"...\"")
         f["status"] = "in_progress"
     elif args.action == "done":
         if f.get("status") != "in_progress":
