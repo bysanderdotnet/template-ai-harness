@@ -25,6 +25,7 @@ hand-edit. New build/test/lint commands → `cmd set`, not edits here.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -36,16 +37,9 @@ SCRIPT = "./AGENTS.sh"
 
 
 def find_root():
-    try:
-        out = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True,
-        )
-        if out.returncode == 0 and out.stdout.strip():
-            return out.stdout.strip()
-    except OSError:
-        pass
-    # Fallback: this file lives at <root>/.agents/agents.py
+    # This file lives at <root>/.agents/agents.py. Anchor on the script, not
+    # the caller's cwd: invoked via absolute path from inside another repo,
+    # a cwd-based root would read/write that repo's files.
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -464,12 +458,19 @@ def cmd_init(args):
     if not fails:
         print("structure OK")
 
-    mark_step = getattr(args, "step", None) if getattr(args, "action", None) == "done" else None
-    if setup_pending(cfg) is not None:
+    in_setup = setup_pending(cfg) is not None
+    mark_step = None
+    if getattr(args, "action", None) == "done":
+        if not in_setup:
+            print("note: setup already complete — 'init done' only applies during setup.")
+        elif not getattr(args, "step", None):
+            die("init done needs a step name: "
+                + ", ".join(n for n, *_ in SETUP_STEPS))
+        else:
+            mark_step = args.step
+    if in_setup:
         setup_flow(cfg, mark_step=mark_step, force=getattr(args, "force", False))
         cfg = load_config()  # setup just finalized; continue into a normal session
-    elif getattr(args, "action", None) == "done":
-        print("note: setup already complete — 'init done' only applies during setup.")
 
     print("-- skills (playbooks; follow when task matches) --")
     skills = list_skills()
@@ -513,7 +514,7 @@ def cmd_init(args):
     open_blocker = None
     if entries:
         latest = entries[-1]
-        print(f"{len(entries)} entries. Latest:")
+        print(f"{len(entries)} entr{'y' if len(entries) == 1 else 'ies'}. Latest:")
         print(render_entry(latest))
         blockers = latest.get("blockers", "")
         if blockers and blockers.lower() not in ("none", "none.", "no", "-"):
@@ -594,6 +595,19 @@ def cmd_verify(_args):
         sys.exit(1)
 
 
+def tree_state():
+    """Content hash of the tracked working tree, commit-independent and
+    excluding .agents/ (harness state: log/feature updates after a verify run
+    must not mark it stale). A verify stays fresh when the exact tree it
+    checked is committed afterwards."""
+    stash = git("stash", "create")  # tree of HEAD + uncommitted tracked changes
+    out = git("ls-tree", (stash or "HEAD") + "^{tree}")
+    if not out:
+        return None
+    lines = [l for l in out.splitlines() if not l.endswith("\t.agents")]
+    return hashlib.sha1("\n".join(lines).encode("utf-8")).hexdigest()
+
+
 def record_verify(result, failed=None):
     scratch = load_scratch()
     scratch["last_verify"] = {
@@ -601,6 +615,7 @@ def record_verify(result, failed=None):
         "failed_step": failed,
         "date": now_utc(),
         "head": git("rev-parse", "--short", "HEAD") or None,
+        "tree": tree_state(),
     }
     save_scratch(scratch)
 
@@ -635,9 +650,8 @@ def verified_note():
     note = f"{lv.get('result', '?')} ({lv.get('date', '?')} @ {lv.get('head') or 'no-commit'})"
     if lv.get("result") == "fail" and lv.get("failed_step"):
         note += f" — failed at {lv['failed_step']}"
-    head = git("rev-parse", "--short", "HEAD") or None
-    if lv.get("head") != head:
-        note += " — STALE: HEAD moved since that run, re-verify"
+    if lv.get("tree") != tree_state():
+        note += " — STALE: files changed since that run, re-verify"
     return note
 
 
@@ -689,6 +703,9 @@ def cmd_handoff(_args):
     """End-of-session checklist; state on disk beats memory in context."""
     print("== handoff: end-of-session checklist ==")
     cfg = load_config()
+    if setup_pending(cfg) is not None:
+        print(f"Project setup incomplete — finish first: {SCRIPT} init")
+        sys.exit(1)
     todo = 0
 
     def item(ok, label, detail):
@@ -696,15 +713,14 @@ def cmd_handoff(_args):
         todo += 0 if ok else 1
         print(f"  [{'ok' if ok else '..'}] {label}: {detail}")
 
-    head = git("rev-parse", "--short", "HEAD") or None
     lv = load_scratch().get("last_verify")
     if lv is None:
         item(False, "verify", f"no run recorded — run: {SCRIPT} verify")
     elif lv.get("result") != "pass":
         item(False, "verify", f"last run FAILED at {lv.get('failed_step')} — fix and rerun, "
                               "or hand off explicitly as unverified/broken in the log")
-    elif lv.get("head") != head:
-        item(False, "verify", f"last pass from a different commit — rerun: {SCRIPT} verify")
+    elif lv.get("tree") != tree_state():
+        item(False, "verify", f"files changed since last pass — rerun: {SCRIPT} verify")
     else:
         item(True, "verify", f"pass ({lv.get('date')})")
 
@@ -817,6 +833,8 @@ def cmd_feature(args):
                 f"Finish (feature done {wip[0].get('id')}) or block it first.")
         f["status"] = "in_progress"
     elif args.action == "done":
+        if f.get("status") != "in_progress":
+            print(f"WARN: {f['id']} was '{f.get('status')}', not in_progress — marking done anyway.")
         f["status"] = "done"
     elif args.action == "block":
         f["status"] = "blocked"
@@ -1076,6 +1094,10 @@ def cmd_cmd(args):
     if not args.command:
         die('cmd set needs the shell command: cmd set <name> "<shell command>"')
     entry = {"run": args.command}
+    old = cmds.get(args.name, {})
+    for key in ("verify", "init", "desc"):  # updates keep flags/desc — clear via cmd rm
+        if old.get(key):
+            entry[key] = old[key]
     if args.verify:
         entry["verify"] = True
     if args.init:
@@ -1214,7 +1236,8 @@ examples:
   {SCRIPT} cmd set deps "npm ci" --init             session-start smoke check
   {SCRIPT} cmd set dev "npm run dev"                on-demand helper (use: run dev)
   {SCRIPT} cmd rm lint
-verify steps run in listed order — register cheap/fast checks first.""")
+verify steps run in listed order — register cheap/fast checks first.
+re-running set on an existing name keeps its flags/desc; clear with cmd rm.""")
     cm.add_argument("action", choices=["set", "rm", "list"])
     cm.add_argument("name", nargs="?", help="command name, e.g. test")
     cm.add_argument("command", nargs="?", help="shell command, e.g. \"npm test\"")
@@ -1238,7 +1261,12 @@ verify steps run in listed order — register cheap/fast checks first.""")
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
-    args.fn(args)
+    try:
+        args.fn(args)
+    except BrokenPipeError:
+        # output piped into e.g. `head` that exited early — not an error
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        sys.exit(141)  # 128 + SIGPIPE
 
 
 if __name__ == "__main__":
