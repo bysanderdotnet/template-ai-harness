@@ -32,7 +32,7 @@ jobs:
         # check always; init + verify once guided setup is complete.
         run: ./AGENTS.sh ci
 
-  auto-merge-pr:
+  pr-automation:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     permissions:
@@ -41,8 +41,6 @@ jobs:
       issues: write
       checks: read
       statuses: read
-    outputs:
-      has_open_prs: ${{ steps.merge.outputs.has_open_prs }}
     steps:
       - uses: actions/checkout@v4
 
@@ -52,16 +50,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: ./AGENTS.sh automate auto-merge-pr --repo "${{ github.repository }}"
 
-  auto-create-pr:
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    needs: auto-merge-pr
-    steps:
-      - uses: actions/checkout@v4
-
       - name: Trigger next PR webhook
         run: >-
           ./AGENTS.sh automate auto-create-pr
-          --has-open-prs "${{ needs.auto-merge-pr.outputs.has_open_prs || 'true' }}"
+          --has-open-prs "${{ steps.merge.outputs.has_open_prs || 'true' }}"
