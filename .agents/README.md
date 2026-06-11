@@ -15,9 +15,10 @@ not inspect or edit this directory directly; use the root wrapper instead:
 | `skills/` | Task playbooks (`<name>/SKILL.md`) | Add one per recurring task (`skills/new-skill/SKILL.md`) |
 
 `AGENTS.sh` is the stable public interface. It finds Python and forwards to
-`agents.py`, which is deliberately a guide, not just a runner: `setup` walks
-first-time configuration step by step, `init` snapshots state and suggests the
-next action, `verify` runs the registered definition of done, `docs` shows a
+`agents.py`, which is deliberately a guide, not just a runner: `init` walks
+first-time configuration step by step on a fresh project, then each session
+snapshots state and suggests the next action, `verify` runs the registered
+definition of done, `docs` shows a
 generated repo map plus curated rules (architecture / conventions / testing),
 `maintenance` flags what to combine, prune, or re-check, and `handoff` checks
 the session is safely closeable. Subcommand details live in

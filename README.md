@@ -55,8 +55,7 @@ tells the agent what to do next at every step.
 
 | Subcommand | Job |
 |---|---|
-| `setup` | Guided first-time configuration: shows status and current step instructions; final gates run automatically |
-| `init` | Session start: health check, skills index, rule counts, git status, current feature, recent progress, and a concrete next step |
+| `init` | Session start: on a fresh project it walks guided setup step by step; otherwise health check, skills index, rule counts, git status, current feature, recent progress, and a concrete next step |
 | `verify` | Definition of done: runs registered `--verify` commands in order and records the result |
 | `handoff` | End-of-session checklist with live status: verify fresh? progress logged? feature closed? committed? pushed? |
 | `docs` | Live project docs: a repo map generated from `git ls-files` (never drifts) + curated rules for architecture, conventions, and testing |
