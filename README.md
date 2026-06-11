@@ -5,6 +5,10 @@ small, project-local workflow layer that helps AI coding agents start sessions,
 stay scoped to one feature, run verification, record progress, and hand work off
 cleanly between sessions.
 
+> Starting a new project from this template? Just start an agent session —
+> the harness detects the unconfigured project and guides the agent through
+> setup step by step (`./agents.sh init`).
+
 ## Quick start
 
 Use the root wrapper for all harness operations:
