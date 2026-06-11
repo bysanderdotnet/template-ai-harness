@@ -13,20 +13,5 @@
     }
   ],
   "progress": [],
-  "rules": [],
-  "settings": {
-    "github": {
-      "auto_merge_pr": {
-        "enabled": false,
-        "notify_on_blocked": false,
-        "notify_tags": []
-      },
-      "auto_create_pr": {
-        "enabled": false,
-        "webhook_url": "https://auto-create-pr.bysander.net/?repo={r}",
-        "repository": "",
-        "token_env": "AUTO_MERGE_PR"
-      }
-    }
-  }
+  "rules": []
 }

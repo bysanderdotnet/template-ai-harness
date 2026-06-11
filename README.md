@@ -34,14 +34,14 @@ CLAUDE.md -> AGENTS.md     Claude Code entrypoint (symlink)
 GEMINI.md -> AGENTS.md     Gemini CLI entrypoint (symlink)
 .github/
 ├── copilot-instructions.md  GitHub Copilot entrypoint (points to AGENTS.md)
-└── workflows/agents.yml   CI plus optional 10-minute PR automation
+└── workflows/agents.yml   CI: ./AGENTS.sh ci on push/PR
 .claude/
 ├── settings.json          SessionStart hook (auto-runs ./AGENTS.sh init) + permissions
 └── skills -> .agents/skills   Skill auto-discovery for Claude Code
 .agents/
 ├── README.md              Map of harness internals + design principles
-├── agents.py              Harness CLI + optional PR automation; use ./AGENTS.sh help
-├── agents.json            All durable state: commands, features, progress log, rules, settings
+├── agents.py              Harness CLI implementation; use ./AGENTS.sh help
+├── agents.json            All durable state: commands, features, progress log, rules
 ├── agents.scratch.json    Transient scratch (gitignored; last verify result)
 └── skills/
     └── new-skill/         How to author new skills (projects grow their own)
@@ -64,50 +64,11 @@ tells the agent what to do next at every step.
 | `feature list/add/start/done/block/note` | Scope tracking; enforces one feature in progress |
 | `log`, `progress` | Session log: entries auto-stamped with date, commit, and last verify result |
 | `check`, `ci` | Structure validation / the single call CI makes |
-| `github automate` | Runs GitHub automations (`auto-merge-pr`, `auto-create-pr`); only works inside GitHub Actions runners |
-| `github settings` | GitHub automation settings: `auto-merge-pr` and `auto-create-pr` |
 
 Agents never need to know where state lives or hand-edit JSON. Adding a test
 step to a project is `./AGENTS.sh cmd set test "npm test" --verify`, not a
 script rewrite. All subcommand documentation lives in `./AGENTS.sh help`, so
 the manual never drifts from the tool.
-
-## Optional PR automation
-
-The existing `agents.yml` workflow includes an opt-in automation job that runs only on the 10-minute schedule:
-
-```sh
-./AGENTS.sh github settings show
-./AGENTS.sh github settings auto-merge-pr --on
-./AGENTS.sh github settings auto-merge-pr --notify-on --tags "@jules @codex"
-./AGENTS.sh github settings auto-create-pr --repo "org/repo" --on
-./AGENTS.sh github automate auto-merge-pr --repo org/repo
-```
-
-Settings can be configured from any machine, but `github automate` only works
-inside GitHub Actions runners; every `./AGENTS.sh github ...` invocation prints
-a reminder of this.
-
-`auto-merge-pr` merges open PRs with no merge conflicts once CI is green. If a
-repo has no CI, it only checks merge conflicts. Failed CI or conflicts can get a
-PR comment with configured agent tags. Pending CI waits for the next run.
-
-`auto-create-pr` runs after `auto-merge-pr` (which reports open-PR state even
-when merging itself is disabled). If PRs remain open, it stops. If no
-PRs remain and `.agents/agents.json` still has open features, it POSTs to the
-configured webhook URL with `{r}` / `{repo}` replaced by the configured
-repository, sending `Authorization: Bearer <token>`. The token is read from the
-environment variable named by the `token_env` setting (default `AUTO_MERGE_PR`,
-change via `./AGENTS.sh github settings auto-create-pr --token-env NAME`); if that
-variable is empty the webhook call is skipped.
-
-Manual `workflow_dispatch` runs still execute the verify job only. Defaults are safe:
-both automations are off, blocked-PR comments are off, tags are empty, and the
-auto-create webhook URL defaults to `https://auto-create-pr.bysander.net/?repo={r}`.
-When guided setup completes, the harness stores `org/repo` automatically when it
-can extract one from `GITHUB_REPOSITORY` or a hosted Git remote URL. The `auto-create-pr`
-setting cannot be enabled until both the webhook URL and `org/repo` value are
-configured. In the workflow, empty values skip the webhook call.
 
 ## Project docs that don't rot
 

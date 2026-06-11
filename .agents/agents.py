@@ -18,9 +18,6 @@ Subcommands (details + examples: ./AGENTS.sh help <command>):
     run          run one registered command by name
     check        structure/state validation only
     ci           what CI runs: check, then init + verify once setup complete
-    github       GitHub-only automations (auto-merge-pr, auto-create-pr):
-                 `github settings` configures, `github automate` runs
-                 (running works only inside GitHub Actions runners)
 
 Stdlib only; Python 3.8+. Durable state: .agents/agents.json; scratch:
 .agents/agents.scratch.json (gitignored). Both owned by this script — never
@@ -34,10 +31,7 @@ import os
 import re
 import subprocess
 import sys
-import time
 from datetime import datetime, timezone
-from urllib.parse import quote, urlparse
-from urllib.request import Request, urlopen
 
 SCRIPT = "./AGENTS.sh"
 
@@ -55,8 +49,6 @@ SCRATCH_PATH = os.path.join(ROOT, ".agents", "agents.scratch.json")
 SKILLS_DIR = os.path.join(ROOT, ".agents", "skills")
 
 PROGRESS_DEFAULT_SHOWN = 5   # entries shown by `progress` / referenced by `init`
-DEFAULT_AUTO_CREATE_PR_URL = "https://auto-create-pr.bysander.net/?repo={r}"
-DEFAULT_AUTO_CREATE_PR_TOKEN_ENV = "AUTO_MERGE_PR"
 RULE_CATEGORIES = ("architecture", "conventions", "testing")
 RULES_SOFT_CAP = 12          # per category; above this, maintenance says combine/prune
 RULE_STALE_DAYS = 90         # rules older than this get flagged for a re-check
@@ -102,59 +94,6 @@ def tip(msg):
 
 # ---------- state (single file: agents.json; scratch: agents.scratch.json) ----------
 
-def default_settings():
-    return {
-        "github": {
-            "auto_merge_pr": {
-                "enabled": False,
-                "notify_on_blocked": False,
-                "notify_tags": [],
-            },
-            "auto_create_pr": {
-                "enabled": False,
-                "webhook_url": DEFAULT_AUTO_CREATE_PR_URL,
-                "repository": "",
-                "token_env": DEFAULT_AUTO_CREATE_PR_TOKEN_ENV,
-            },
-        },
-    }
-
-
-def setting_enabled(on, off, current):
-    if on and off:
-        die("choose --on or --off, not both")
-    if on:
-        return True
-    if off:
-        return False
-    return current
-
-
-def section_error(cfg):
-    """Wrong-typed sections (hand-edit damage); None when the shape is sane."""
-    for key, typ in (("setup", dict), ("commands", dict), ("features", list),
-                     ("progress", list), ("rules", list), ("settings", dict)):
-        if key in cfg and not isinstance(cfg[key], typ):
-            kind = "object" if typ is dict else "array"
-            return f"'{key}' must be a JSON {kind}"
-    for key in ("features", "progress", "rules"):
-        if any(not isinstance(x, dict) for x in cfg.get(key, []) or []):
-            return f"'{key}' entries must be JSON objects"
-    if any(not isinstance(v, dict) for v in (cfg.get("commands") or {}).values()):
-        return "'commands' entries must be JSON objects"
-    settings = cfg.get("settings") or {}
-    if "github" in settings and not isinstance(settings["github"], dict):
-        return "'settings.github' must be a JSON object"
-    github = settings.get("github") or {}
-    for key in ("auto_merge_pr", "auto_create_pr"):
-        if key in github and not isinstance(github[key], dict):
-            return f"'settings.github.{key}' must be a JSON object"
-    setup = cfg.get("setup")
-    if isinstance(setup, dict) and "done" in setup and not isinstance(setup["done"], list):
-        return "'setup.done' must be a JSON array"
-    return None
-
-
 def load_config():
     """All durable harness state. Top-level keys are independent sections so
     future harness versions can add more without migrations."""
@@ -169,102 +108,14 @@ def load_config():
     if not isinstance(cfg, dict):
         die(".agents/agents.json is not a JSON object. "
             "Restore from git history — never hand-edit.")
-    err = section_error(cfg)
-    if err:
-        die(f".agents/agents.json invalid: {err}. "
-            "Restore from git history — never hand-edit.")
     for key, default in (("commands", {}), ("features", []),
-                         ("progress", []), ("rules", []),
-                         ("settings", default_settings())):
+                         ("progress", []), ("rules", [])):
         cfg.setdefault(key, default)
-    github = cfg["settings"].setdefault("github", {})
-    merge = github.setdefault("auto_merge_pr", {})
-    merge.setdefault("enabled", False)
-    merge.setdefault("notify_on_blocked", False)
-    merge.setdefault("notify_tags", [])
-    create = github.setdefault("auto_create_pr", {})
-    create.setdefault("enabled", False)
-    create.setdefault("webhook_url", DEFAULT_AUTO_CREATE_PR_URL)
-    create.setdefault("repository", "")
-    create.setdefault("token_env", DEFAULT_AUTO_CREATE_PR_TOKEN_ENV)
     return cfg
 
 
 def save_config(cfg):
     save_json(CONFIG_PATH, cfg)
-
-
-def normalize_repo_slug(url):
-    """Extract org/repo from hosted Git remote URL forms. Bare filesystem
-    paths (e.g. a local clone source) are not repository slugs."""
-    if not url:
-        return ""
-    url = url.strip()
-    if not url:
-        return ""
-
-    if "://" in url:
-        path = urlparse(url).path
-    elif re.match(r"^[^@/]+@[^:/]+:", url):
-        path = url.split(":", 1)[1]
-    else:
-        return ""
-
-    path = path.strip().strip("/")
-    if path.endswith(".git"):
-        path = path[:-4]
-    parts = [p for p in path.split("/") if p]
-    if len(parts) < 2:
-        return ""
-    org, repo = parts[-2], parts[-1]
-    if not re.match(r"^[A-Za-z0-9_.-]+$", org):
-        return ""
-    if not re.match(r"^[A-Za-z0-9_.-]+$", repo):
-        return ""
-    return f"{org}/{repo}"
-
-
-def git_remote_urls():
-    out = subprocess.run(
-        ["git", "remote", "-v"], capture_output=True, text=True, cwd=ROOT,
-    )
-    if out.returncode != 0:
-        return []
-    urls = []
-    for line in out.stdout.splitlines():
-        parts = line.split()
-        if len(parts) >= 2 and parts[1] not in urls:
-            urls.append(parts[1])
-    return urls
-
-
-def detect_repository_slug():
-    env_repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
-    if re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", env_repo):
-        return env_repo
-    for url in git_remote_urls():
-        slug = normalize_repo_slug(url)
-        if slug:
-            return slug
-    return ""
-
-
-def setup_automation_defaults(cfg):
-    """Set first-setup-only automation defaults. Runs when setup finalizes —
-    not on every init — so an unconfigured template checkout stays pristine."""
-    github = cfg["settings"].setdefault("github", {})
-    create = github.setdefault("auto_create_pr", {})
-    changed = False
-    if not create.get("webhook_url"):
-        create["webhook_url"] = DEFAULT_AUTO_CREATE_PR_URL
-        changed = True
-    if not create.get("repository"):
-        repo = detect_repository_slug()
-        if repo:
-            create["repository"] = repo
-            changed = True
-    if changed:
-        save_config(cfg)
 
 
 def load_scratch():
@@ -325,10 +176,6 @@ def collect_problems():
             cfg = load_json(CONFIG_PATH)
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             fails.append(f".agents/agents.json is not valid JSON: {e}")
-    if isinstance(cfg, dict) and section_error(cfg):
-        fails.append(f".agents/agents.json invalid: {section_error(cfg)} — "
-                     "restore from git history, never hand-edit")
-        cfg = None
     if isinstance(cfg, dict):
         wip = [f for f in cfg.get("features", []) if f.get("status") == "in_progress"]
         if len(wip) > 1:
@@ -350,10 +197,6 @@ def collect_problems():
                 warns.append(f".agents/skills/{name}/ has no SKILL.md")
             elif not skill_description(md):
                 warns.append(f".agents/skills/{name}/SKILL.md missing 'description:' frontmatter")
-
-    if not git("rev-parse", "--is-inside-work-tree"):
-        warns.append("not a git checkout — repo map, verify staleness tracking, "
-                     "and the setup marker scan are degraded")
     return fails, warns
 
 
@@ -408,17 +251,7 @@ def _check_project():
              if not re.search(rf"^- {field}:[ \t]*\S", section, re.M)]
     if empty:
         return False, "AGENTS.md '## Project' fields empty: " + ", ".join(empty)
-    readme = os.path.join(ROOT, "README.md")
-    if not os.path.isfile(readme):
-        return False, "README.md missing — write one for the actual project"
-    try:
-        with open(readme, encoding="utf-8") as fh:
-            rtext = fh.read()
-    except OSError:
-        return False, "README.md unreadable"
-    if "Template repository for setting up projects with an AI harness" in rtext:
-        return False, "README.md still template text — rewrite for the actual project"
-    return True, "AGENTS.md project section filled, README.md rewritten"
+    return True, "AGENTS.md project section filled"
 
 
 def _check_commands():
@@ -520,7 +353,6 @@ def setup_finalize(cfg):
         tip(f"fix blockers, rerun: {SCRIPT} init")
         sys.exit(1)
 
-    setup_automation_defaults(cfg)
     f000 = find_feature(cfg["features"], "F-000")
     if f000:
         f000["status"] = "done"
@@ -764,33 +596,14 @@ def cmd_verify(_args):
 
 
 def tree_state():
-    """Content hash of the working tree (tracked + untracked non-ignored
-    files), commit-independent and excluding .agents/ (harness state:
-    log/feature updates after a verify run must not mark it stale). A verify
-    stays fresh when the exact tree it checked is committed afterwards.
-    Built via a throwaway index so new files count — `git stash create`
-    would miss untracked files and mark fresh verifies stale on commit."""
-    git_dir = git("rev-parse", "--absolute-git-dir")
-    if not git_dir:
+    """Content hash of the tracked working tree, commit-independent and
+    excluding .agents/ (harness state: log/feature updates after a verify run
+    must not mark it stale). A verify stays fresh when the exact tree it
+    checked is committed afterwards."""
+    stash = git("stash", "create")  # tree of HEAD + uncommitted tracked changes
+    out = git("ls-tree", (stash or "HEAD") + "^{tree}")
+    if not out:
         return None
-    idx = os.path.join(git_dir, "agents-tree-state.index")
-    env = dict(os.environ, GIT_INDEX_FILE=idx)
-    try:
-        add = subprocess.run(["git", "add", "-A", "."], capture_output=True,
-                             text=True, cwd=ROOT, env=env)
-        if add.returncode != 0:
-            return None
-        wt = subprocess.run(["git", "write-tree"], capture_output=True,
-                            text=True, cwd=ROOT, env=env)
-        if wt.returncode != 0:
-            return None
-        tree = wt.stdout.strip()
-    finally:
-        try:
-            os.remove(idx)
-        except OSError:
-            pass
-    out = git("ls-tree", tree)
     lines = [l for l in out.splitlines() if not l.endswith("\t.agents")]
     return hashlib.sha1("\n".join(lines).encode("utf-8")).hexdigest()
 
@@ -844,12 +657,9 @@ def verified_note():
 
 def cmd_log(args):
     cfg = load_config()
-    title = args.title.strip()
-    if not title:
-        die("log needs a non-empty title")
     entry = {
         "date": now_utc(),
-        "title": title,
+        "title": args.title,
         "done": args.done,
         "verified": args.verified or verified_note(),
     }
@@ -989,8 +799,7 @@ def cmd_feature(args):
         return
 
     if args.action == "add":
-        title = (args.title or "").strip()
-        if not title:
+        if not args.title:
             die("feature add needs a title: feature add \"<title>\"")
         fid = args.id
         if fid is None:
@@ -1001,7 +810,7 @@ def cmd_feature(args):
             die("feature id must be letters/digits/dashes/underscores, e.g. F-001")
         if find_feature(feats, fid):
             die(f"feature id '{fid}' already exists")
-        f = {"id": fid, "title": title, "status": "todo"}
+        f = {"id": fid, "title": args.title, "status": "todo"}
         if args.notes:
             f["notes"] = args.notes
         feats.append(f)
@@ -1022,8 +831,6 @@ def cmd_feature(args):
         if wip:
             die(f"{wip[0].get('id')} already in_progress (policy: max 1). "
                 f"Finish (feature done {wip[0].get('id')}) or block it first.")
-        if f.get("status") == "done":
-            print(f"WARN: {f['id']} was done — reopening.")
         f["status"] = "in_progress"
     elif args.action == "done":
         if f.get("status") != "in_progress":
@@ -1105,17 +912,16 @@ def cmd_docs(args):
     if args.action == "add":
         if args.target not in RULE_CATEGORIES:
             die(f"docs add needs a category: {' | '.join(RULE_CATEGORIES)}")
-        text = (args.text or "").strip()
-        if not text:
+        if not args.text:
             die('docs add needs the rule text: docs add <category> "<rule>"')
-        if len(text) > 160:
+        if len(args.text) > 160:
             print("WARN: long rule — caveman style, split or trim.")
         nums = [int(m.group(1)) for r in rules
                 for m in [re.match(r"R-(\d+)$", r.get("id", ""))] if m]
         rule = {
             "id": f"R-{(max(nums) + 1 if nums else 1):03d}",
             "category": args.target,
-            "text": text,
+            "text": args.text,
             "added": now_utc()[:10],
         }
         rules.append(rule)
@@ -1314,301 +1120,6 @@ def cmd_run(args):
     sys.exit(subprocess.run(c["run"], shell=True, cwd=ROOT).returncode)
 
 
-def github_runner_note():
-    print("note: GitHub automations execute only inside GitHub Actions runners; "
-          "settings can be configured anywhere.")
-
-
-def render_settings(settings):
-    merge = settings["auto_merge_pr"]
-    create = settings["auto_create_pr"]
-    tags = " ".join(merge.get("notify_tags") or []) or "(none)"
-    print("auto-merge-pr:")
-    print(f"  enabled: {str(bool(merge.get('enabled'))).lower()}")
-    print(f"  notify_on_blocked: {str(bool(merge.get('notify_on_blocked'))).lower()}")
-    print(f"  notify_tags: {tags}")
-    print("auto-create-pr:")
-    print(f"  enabled: {str(bool(create.get('enabled'))).lower()}")
-    print(f"  webhook_url: {create.get('webhook_url') or '(empty)'}")
-    print(f"  repository: {create.get('repository') or '(empty)'}")
-    print(f"  token_env: {create.get('token_env') or '(empty)'}")
-
-
-def cmd_settings(args):
-    github_runner_note()
-    cfg = load_config()
-    settings = cfg["settings"]["github"]
-
-    if args.area == "show":
-        render_settings(settings)
-        return
-
-    if args.area == "auto-merge-pr":
-        merge = settings["auto_merge_pr"]
-        merge["enabled"] = setting_enabled(args.on, args.off, merge.get("enabled", False))
-        if args.notify_on and args.notify_off:
-            die("choose --notify-on or --notify-off, not both")
-        if args.notify_on:
-            merge["notify_on_blocked"] = True
-        if args.notify_off:
-            merge["notify_on_blocked"] = False
-        if args.tags is not None:
-            merge["notify_tags"] = [t for t in args.tags.split() if t]
-        save_config(cfg)
-        render_settings(settings)
-        return
-
-    if args.area == "auto-create-pr":
-        create = settings["auto_create_pr"]
-        enabled = setting_enabled(args.on, args.off, create.get("enabled", False))
-        webhook_url = args.url if args.url is not None else create.get("webhook_url", "")
-        repository = args.repo if args.repo is not None else create.get("repository", "")
-        token_env = (args.token_env if args.token_env is not None
-                     else create.get("token_env", DEFAULT_AUTO_CREATE_PR_TOKEN_ENV))
-        if enabled and (not webhook_url or not repository):
-            die("auto-create-pr needs --url and --repo before --on")
-        create["enabled"] = enabled
-        create["webhook_url"] = webhook_url
-        create["repository"] = repository
-        create["token_env"] = token_env
-        save_config(cfg)
-        render_settings(settings)
-        return
-
-    die("unknown settings area")
-
-
-
-# ---------- GitHub automation ----------
-
-AUTO_MERGE_MARKER = "<!-- agents-auto-merge-pr -->"
-BAD_STATUS_STATES = {"failure", "error"}
-BAD_CHECK_CONCLUSIONS = {"failure", "cancelled", "timed_out", "action_required"}
-OK_CHECK_CONCLUSIONS = {"success", "neutral", "skipped"}
-PENDING_CHECK_STATUSES = {"queued", "requested", "waiting", "pending", "in_progress"}
-
-
-def setting(cfg, section):
-    return cfg.get("settings", {}).get("github", {}).get(section, {})
-
-
-def gh_proc(args):
-    try:
-        return subprocess.run(["gh", *args], cwd=ROOT, text=True,
-                              capture_output=True)
-    except FileNotFoundError:
-        die("gh CLI not found — automations need GitHub CLI "
-            "(preinstalled on GitHub Actions runners)")
-
-
-def gh_json(*args):
-    proc = gh_proc(["api", *args])
-    if proc.returncode != 0:
-        print(proc.stderr.strip() or proc.stdout.strip(), file=sys.stderr)
-        sys.exit(proc.returncode)
-    try:
-        return json.loads(proc.stdout or "null")
-    except ValueError as e:
-        die(f"gh api {args[0]} returned non-JSON output: {e}")
-
-
-def gh_run(*args):
-    proc = gh_proc(list(args))
-    if proc.stdout.strip():
-        print(proc.stdout.strip())
-    if proc.stderr.strip():
-        print(proc.stderr.strip(), file=sys.stderr)
-    return proc.returncode
-
-
-def set_output(name, value):
-    path = os.environ.get("GITHUB_OUTPUT")
-    if path:
-        with open(path, "a", encoding="utf-8") as fh:
-            fh.write(f"{name}={value}\n")
-
-
-def open_prs(repo):
-    # query params in the URL: `gh api -f` would switch the request to POST
-    return gh_json(f"repos/{repo}/pulls?state=open&per_page=100")
-
-
-def pr_details(repo, number):
-    detail = None
-    for _ in range(6):
-        detail = gh_json(f"repos/{repo}/pulls/{number}")
-        if detail.get("mergeable") is not None:
-            break
-        time.sleep(2)
-    return detail
-
-
-def ci_state(repo, sha):
-    status = gh_json(f"repos/{repo}/commits/{sha}/status")
-    check_runs = gh_json(f"repos/{repo}/commits/{sha}/check-runs?per_page=100")
-    statuses = status.get("statuses") or []
-    checks = check_runs.get("check_runs") or []
-    failures = []
-    pending = []
-
-    for item in statuses:
-        name = item.get("context") or "commit status"
-        state = item.get("state")
-        if state in BAD_STATUS_STATES:
-            failures.append(f"{name}: {state}")
-        elif state != "success":
-            pending.append(f"{name}: {state}")
-
-    for item in checks:
-        name = item.get("name") or "check run"
-        status_name = item.get("status")
-        conclusion = item.get("conclusion")
-        if status_name == "completed":
-            if conclusion in BAD_CHECK_CONCLUSIONS:
-                failures.append(f"{name}: {conclusion}")
-            elif conclusion not in OK_CHECK_CONCLUSIONS:
-                pending.append(f"{name}: {conclusion or 'unknown'}")
-        elif status_name in PENDING_CHECK_STATUSES or status_name:
-            pending.append(f"{name}: {status_name}")
-
-    return bool(statuses or checks), failures, pending
-
-
-def comment_body(reason, tags):
-    tag_line = " ".join(tags).strip()
-    lead = f"{tag_line}\n\n" if tag_line else ""
-    return (f"{lead}{AUTO_MERGE_MARKER}\n"
-            "Auto-merge blocked. Fix needed:\n"
-            f"- {reason}")
-
-
-def ensure_comment(repo, number, body):
-    comments = gh_json(f"repos/{repo}/issues/{number}/comments?per_page=100")
-    for comment in comments:
-        if AUTO_MERGE_MARKER in (comment.get("body") or ""):
-            if comment.get("body") == body:
-                print(f"PR #{number}: blocked comment already current")
-                return
-            gh_run("api", f"repos/{repo}/issues/comments/{comment['id']}",
-                   "-X", "PATCH", "-f", f"body={body}")
-            print(f"PR #{number}: blocked comment updated")
-            return
-    gh_run("api", f"repos/{repo}/issues/{number}/comments", "-f", f"body={body}")
-    print(f"PR #{number}: blocked comment posted")
-
-
-def cmd_automate(args):
-    github_runner_note()
-    if args.action == "auto-merge-pr":
-        if not args.repo:
-            die("github automate auto-merge-pr needs --repo org/repo")
-        automate_auto_merge_pr(args)
-    elif args.action == "auto-create-pr":
-        automate_auto_create_pr(args)
-    else:
-        die("unknown automate action")
-
-
-def automate_auto_merge_pr(args):
-    cfg = load_config()
-    cfg_set = setting(cfg, "auto_merge_pr")
-    set_output("auto_merge_enabled", str(bool(cfg_set.get("enabled"))).lower())
-
-    if not cfg_set.get("enabled", False):
-        # Still report real open-PR state: auto-create-pr may be enabled on
-        # its own and must not be blocked by a hardcoded "true".
-        print("auto-merge-pr disabled")
-        remaining = open_prs(args.repo)
-        set_output("has_open_prs", str(bool(remaining)).lower())
-        print(f"open_prs_remaining={len(remaining)}")
-        return
-
-    prs = open_prs(args.repo)
-    notify = cfg_set.get("notify_on_blocked", False)
-    tags = cfg_set.get("notify_tags") or []
-
-    for pr in prs:
-        number = pr["number"]
-        detail = pr_details(args.repo, number)
-        sha = detail["head"]["sha"]
-        print(f"PR #{number}: {detail.get('title', '')}")
-
-        if detail.get("mergeable") is False:
-            reason = "merge conflicts"
-            print(f"PR #{number}: blocked: {reason}")
-            if notify:
-                ensure_comment(args.repo, number, comment_body(reason, tags))
-            continue
-
-        has_ci, failures, pending = ci_state(args.repo, sha)
-        if failures:
-            reason = "CI failing: " + "; ".join(failures)
-            print(f"PR #{number}: blocked: {reason}")
-            if notify:
-                ensure_comment(args.repo, number, comment_body(reason, tags))
-            continue
-        if has_ci and pending:
-            print(f"PR #{number}: waiting for CI: {'; '.join(pending)}")
-            continue
-
-        rc = gh_run("pr", "merge", str(number), "--merge", "--repo", args.repo)
-        if rc == 0:
-            print(f"PR #{number}: merged")
-        else:
-            print(f"PR #{number}: merge command failed")
-
-    remaining = open_prs(args.repo)
-    set_output("has_open_prs", str(bool(remaining)).lower())
-    print(f"open_prs_remaining={len(remaining)}")
-
-
-def call_webhook(url, repo, token):
-    encoded = quote(repo, safe="")
-    final_url = url.replace("{r}", encoded).replace("{repo}", encoded)
-    req = Request(final_url, method="POST", headers={
-        "User-Agent": "template-ai-harness",
-        "Authorization": f"Bearer {token}",
-    })
-    try:
-        with urlopen(req, timeout=30) as resp:
-            print(f"webhook_status={resp.status}")
-    except OSError as e:  # URLError/HTTPError/socket errors
-        die(f"webhook call failed ({final_url}): {e}")
-
-
-def automate_auto_create_pr(args):
-    cfg = load_config()
-    cfg_set = setting(cfg, "auto_create_pr")
-
-    if not cfg_set.get("enabled", False):
-        print("auto-create-pr disabled")
-        return
-    if args.has_open_prs == "true":
-        print("open PRs remain; auto-create-pr stopped")
-        return
-
-    url = cfg_set.get("webhook_url", "")
-    repo = cfg_set.get("repository", "")
-    if not url or not repo:
-        print("auto-create-pr needs webhook_url and repository; not calling URL")
-        return
-
-    token_env = cfg_set.get("token_env", DEFAULT_AUTO_CREATE_PR_TOKEN_ENV)
-    token = os.environ.get(token_env, "") if token_env else ""
-    if not token:
-        print(f"auto-create-pr needs bearer token in ${token_env or '(unset token_env)'}; "
-              "not calling URL")
-        return
-
-    open_features = [f for f in cfg.get("features", []) if f.get("status") != "done"]
-    if not open_features:
-        print("no open features; auto-create-pr stopped")
-        return
-
-    print(f"open_features={len(open_features)}")
-    call_webhook(url, repo, token)
-
-
 # ---------- argument parsing ----------
 
 def build_parser():
@@ -1625,8 +1136,6 @@ which command when:
   learned a durable fact {SCRIPT} docs add <category> "<rule>"
   blocked                {SCRIPT} log "<title>" --done "..." --blockers "..."   then ask user
   asked to do upkeep     {SCRIPT} maintenance
-  github automation      {SCRIPT} github settings show
-  run automation         {SCRIPT} github automate auto-merge-pr --repo org/repo
 
 Every command prints a `next:` hint — follow it. State lives in
 .agents/agents.json, owned by this script: manage through these
@@ -1744,61 +1253,6 @@ re-running set on an existing name keeps its flags/desc; clear with cmd rm.""")
     add("check", cmd_check, "structure/state validation only (no setup gate)")
     add("ci", cmd_ci, "what CI runs: check, then init + verify once setup complete")
 
-    gh = sub.add_parser(
-        "github",
-        help="GitHub-only automations (auto-merge-pr, auto-create-pr); "
-             "running them works only inside GitHub Actions runners",
-        description="GitHub-only automations (auto-merge-pr, auto-create-pr); "
-                    "settings can be configured anywhere, but `github automate` "
-                    "works only inside GitHub Actions runners",
-        formatter_class=argparse.RawDescriptionHelpFormatter)
-    ghsub = gh.add_subparsers(dest="github_command", required=True,
-                              metavar="<command>")
-
-    def gh_add(name, fn, help_, epilog=None):
-        sp = ghsub.add_parser(name, help=help_, description=help_, epilog=epilog,
-                              formatter_class=argparse.RawDescriptionHelpFormatter)
-        sp.set_defaults(fn=fn)
-        return sp
-
-    au = gh_add("automate", cmd_automate,
-                "run GitHub automations (GitHub Actions runners only)",
-                epilog=f"""\
-examples:
-  {SCRIPT} github automate auto-merge-pr --repo org/repo
-  {SCRIPT} github automate auto-create-pr --has-open-prs false""")
-    au.add_argument("action", choices=["auto-merge-pr", "auto-create-pr"],
-                    help="automation to run")
-    au.add_argument("--repo", help="auto-merge-pr: GitHub repository, org/name")
-    au.add_argument("--has-open-prs", choices=["true", "false"],
-                    default="true", help="auto-create-pr: output from auto-merge-pr")
-
-    st = gh_add("settings", cmd_settings,
-                "configure GitHub automations: auto-merge-pr and auto-create-pr",
-                epilog=f"""\
-examples:
-  {SCRIPT} github settings show
-  {SCRIPT} github settings auto-merge-pr --on
-  {SCRIPT} github settings auto-merge-pr --notify-on --tags "@jules @codex"
-  {SCRIPT} github settings auto-create-pr --repo "org/repo" --on
-  {SCRIPT} github settings auto-create-pr --url "https://example.com/?myparam={{r}}"
-  {SCRIPT} github settings auto-create-pr --token-env "MY_TOKEN_VAR"
-  {SCRIPT} github settings auto-create-pr --off
-defaults: both off; blocked-PR messages off; no tags; auto-create URL preset; repo detected during setup when possible; bearer token read from $AUTO_MERGE_PR.""")
-    st.add_argument("area", choices=["show", "auto-merge-pr", "auto-create-pr"],
-                    help="settings group")
-    st.add_argument("--on", action="store_true", help="enable this automation")
-    st.add_argument("--off", action="store_true", help="disable this automation")
-    st.add_argument("--notify-on", action="store_true",
-                    help="auto-merge-pr: comment on failed CI/conflicts")
-    st.add_argument("--notify-off", action="store_true",
-                    help="auto-merge-pr: do not comment on failed CI/conflicts")
-    st.add_argument("--tags", help="auto-merge-pr: space-separated tags for comments")
-    st.add_argument("--url", help="auto-create-pr: webhook URL; use {r} for org/repo")
-    st.add_argument("--repo", help="auto-create-pr: org/repo passed to webhook")
-    st.add_argument("--token-env", dest="token_env",
-                    help="auto-create-pr: env var holding the webhook bearer token")
-
     hp = add("help", lambda a: p.parse_args(([a.topic] if a.topic else []) + ["--help"]),
              "show usage; `help <command>` for one command's details")
     hp.add_argument("topic", nargs="?", help="command name, e.g. feature")
@@ -1806,10 +1260,6 @@ defaults: both off; blocked-PR messages off; no tags; auto-create URL preset; re
 
 
 def main(argv=None):
-    if argv is None:
-        argv = sys.argv[1:]
-    if not argv:
-        argv = ["help"]  # bare invocation: show the guide, not a usage error
     args = build_parser().parse_args(argv)
     try:
         args.fn(args)
