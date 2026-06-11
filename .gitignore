@@ -4,6 +4,8 @@
 .claude/settings.local.json
 # Transient scratch state, written by ./AGENTS.sh verify:
 .agents/agents.scratch.json
+# Cross-session lock, held while ./AGENTS.sh runs:
+.agents/agents.json.lock
 # Python bytecode cache from running the harness CLI:
 .agents/__pycache__/
 
