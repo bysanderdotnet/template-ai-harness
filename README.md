@@ -34,16 +34,13 @@ CLAUDE.md -> AGENTS.md     Claude Code entrypoint (symlink)
 GEMINI.md -> AGENTS.md     Gemini CLI entrypoint (symlink)
 .github/
 ├── copilot-instructions.md  GitHub Copilot entrypoint (points to AGENTS.md)
-└── workflows/
-    ├── agents.yml        CI: ./AGENTS.sh ci on push/PR
-    └── pr-automation.yml Optional 10-minute PR merge/create automation
+└── workflows/agents.yml   CI plus optional 10-minute PR automation
 .claude/
 ├── settings.json          SessionStart hook (auto-runs ./AGENTS.sh init) + permissions
 └── skills -> .agents/skills   Skill auto-discovery for Claude Code
 .agents/
 ├── README.md              Map of harness internals + design principles
-├── agents.py              Harness CLI implementation; use ./AGENTS.sh help
-├── github_automation.py   GitHub Actions helper for optional PR automations
+├── agents.py              Harness CLI + optional PR automation; use ./AGENTS.sh help
 ├── agents.json            All durable state: commands, features, progress log, rules, settings
 ├── agents.scratch.json    Transient scratch (gitignored; last verify result)
 └── skills/
@@ -67,6 +64,7 @@ tells the agent what to do next at every step.
 | `feature list/add/start/done/block/note` | Scope tracking; enforces one feature in progress |
 | `log`, `progress` | Session log: entries auto-stamped with date, commit, and last verify result |
 | `check`, `ci` | Structure validation / the single call CI makes |
+| `automate` | Runs template automations used by GitHub Actions |
 | `settings` | Template automation settings: `auto-merge-pr` and `auto-create-pr` |
 
 Agents never need to know where state lives or hand-edit JSON. Adding a test
@@ -76,13 +74,14 @@ the manual never drifts from the tool.
 
 ## Optional PR automation
 
-The template includes an opt-in workflow that runs every 10 minutes:
+The existing `agents.yml` workflow includes opt-in jobs that run every 10 minutes:
 
 ```sh
 ./AGENTS.sh settings show
 ./AGENTS.sh settings auto-merge-pr --on
 ./AGENTS.sh settings auto-merge-pr --notify-on --tags "@jules @codex"
 ./AGENTS.sh settings auto-create-pr --url "https://example.com/?myparam={r}" --repo "org/repo" --on
+./AGENTS.sh automate auto-merge-pr --repo org/repo
 ```
 
 Defaults are safe: both automations are off, blocked-PR comments are off, tags
