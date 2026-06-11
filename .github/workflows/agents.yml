@@ -8,21 +8,15 @@ on:
   push:
     branches: [main]
   pull_request:
-  schedule:
-    - cron: '*/10 * * * *'
   workflow_dispatch:
 
-permissions:
-  contents: read
-
-# Superseded verify runs on the same branch/PR are wasted minutes; cancel them.
+# Superseded runs on the same branch/PR are wasted minutes; cancel them.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'schedule' }}
+  cancel-in-progress: true
 
 jobs:
   verify:
-    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 30 # raise if builds are slow
     steps:
@@ -31,28 +25,3 @@ jobs:
       - name: Harness gates
         # check always; init + verify once guided setup is complete.
         run: ./AGENTS.sh ci
-
-  github-pr-automation:
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-      checks: read
-      statuses: read
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Auto-merge eligible PRs
-        id: merge
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: ./AGENTS.sh github automate auto-merge-pr --repo "${{ github.repository }}"
-
-      - name: Trigger next PR webhook
-        env:
-          AUTO_MERGE_PR: ${{ secrets.AUTO_MERGE_PR }}
-        run: >-
-          ./AGENTS.sh github automate auto-create-pr
-          --has-open-prs "${{ steps.merge.outputs.has_open_prs || 'true' }}"
