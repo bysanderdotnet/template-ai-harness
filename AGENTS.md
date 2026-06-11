@@ -20,8 +20,6 @@ verification, progress, and session handoff. All state lives in
 
 - One feature per session/commit. No drive-by refactors.
 - Done = `./AGENTS.sh verify` green. Anything else is "unverified" — say so.
-- CI (`.github/workflows/`) is human-owned. Never edit it; tell the user when
-  it needs changes.
 - `AGENTS.sh` / `.agents/agents.py` are harness internals. Usage = `--help`,
   not reading or editing source.
 <!-- TODO(setup): add project no-go zones (e.g. "never edit /migrations"), then remove this comment -->
