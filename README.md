@@ -88,14 +88,6 @@ Settings can be configured from any machine, but `github automate` only works
 inside GitHub Actions runners; every `./AGENTS.sh github ...` invocation prints
 a reminder of this.
 
-Manual `workflow_dispatch` runs still execute the verify job only. Defaults are safe:
-both automations are off, blocked-PR comments are off, tags are empty, and the
-auto-create webhook URL defaults to `https://auto-create-pr.bysander.net/?repo={r}`.
-When guided setup completes, the harness stores `org/repo` automatically when it
-can extract one from `GITHUB_REPOSITORY` or a hosted Git remote URL. The `auto-create-pr`
-setting cannot be enabled until both the webhook URL and `org/repo` value are
-configured. In the workflow, empty values skip the webhook call.
-
 `auto-merge-pr` merges open PRs with no merge conflicts once CI is green. If a
 repo has no CI, it only checks merge conflicts. Failed CI or conflicts can get a
 PR comment with configured agent tags. Pending CI waits for the next run.
@@ -108,6 +100,14 @@ repository, sending `Authorization: Bearer <token>`. The token is read from the
 environment variable named by the `token_env` setting (default `AUTO_MERGE_PR`,
 change via `./AGENTS.sh github settings auto-create-pr --token-env NAME`); if that
 variable is empty the webhook call is skipped.
+
+Manual `workflow_dispatch` runs still execute the verify job only. Defaults are safe:
+both automations are off, blocked-PR comments are off, tags are empty, and the
+auto-create webhook URL defaults to `https://auto-create-pr.bysander.net/?repo={r}`.
+When guided setup completes, the harness stores `org/repo` automatically when it
+can extract one from `GITHUB_REPOSITORY` or a hosted Git remote URL. The `auto-create-pr`
+setting cannot be enabled until both the webhook URL and `org/repo` value are
+configured. In the workflow, empty values skip the webhook call.
 
 ## Project docs that don't rot
 
