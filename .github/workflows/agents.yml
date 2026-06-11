@@ -51,6 +51,8 @@ jobs:
         run: ./AGENTS.sh automate auto-merge-pr --repo "${{ github.repository }}"
 
       - name: Trigger next PR webhook
+        env:
+          AUTO_MERGE_PR: ${{ secrets.AUTO_MERGE_PR }}
         run: >-
           ./AGENTS.sh automate auto-create-pr
           --has-open-prs "${{ steps.merge.outputs.has_open_prs || 'true' }}"
