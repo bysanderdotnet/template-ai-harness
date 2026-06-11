@@ -6,20 +6,23 @@ help function instead: ./agents.sh --help
 
 Subcommands (each has --help with details and examples):
 
-    setup     guided first-time project setup, one step at a time
-    init      session-start health check + state snapshot (hook/CI run this)
-    verify    run the registered definition of done; records the result
-    handoff   end-of-session checklist with live status
-    feature   scope: list / add / start / done / block / note
-    log       record a progress entry (auto-stamps date, commit, verify result)
-    progress  show recent progress entries (display bounded, never compact by hand)
-    cmd       register project commands: set / rm / list
-    run       run one registered command by name
-    check     structure/state validation only
-    ci        what CI runs: check, then init + verify once setup is complete
+    setup        guided first-time project setup, one step at a time
+    init         session-start health check + state snapshot (hook/CI run this)
+    verify       run the registered definition of done; records the result
+    handoff      end-of-session checklist with live status
+    feature      scope: list / add / start / done / block / note
+    log          record a progress entry (auto-stamps date, commit, verify result)
+    progress     show recent progress entries (display bounded, never compact by hand)
+    docs         live project docs: generated repo map + curated rules
+    maintenance  health sweep: what to update, combine, prune, re-check
+    cmd          register project commands: set / rm / list
+    run          run one registered command by name
+    check        structure/state validation only
+    ci           what CI runs: check, then init + verify once setup is complete
 
-Standard library only; Python 3.8+. Config lives in .agents/agents.json,
-state in .agents/state/ — owned by this script, never hand-edited. Register
+Standard library only; Python 3.8+. All durable state lives in
+.agents/agents.json; transient scratch in .agents/agents.scratch.json
+(gitignored). Both are owned by this script — never hand-edited. Register
 new build/test/lint commands with `cmd set` instead of editing this file.
 """
 
@@ -50,13 +53,15 @@ def find_root():
 
 ROOT = find_root()
 CONFIG_PATH = os.path.join(ROOT, ".agents", "agents.json")
-PROGRESS_PATH = os.path.join(ROOT, ".agents", "state", "progress.json")
-FEATURES_PATH = os.path.join(ROOT, ".agents", "state", "feature_list.json")
-LAST_VERIFY_PATH = os.path.join(ROOT, ".agents", "state", "last_verify.json")
+SCRATCH_PATH = os.path.join(ROOT, ".agents", "agents.scratch.json")
 SKILLS_DIR = os.path.join(ROOT, ".agents", "skills")
-DOCS_DIR = os.path.join(ROOT, ".agents", "docs")
 
-PROGRESS_DEFAULT_SHOWN = 5  # entries shown by `progress` / referenced by `init`
+PROGRESS_DEFAULT_SHOWN = 5   # entries shown by `progress` / referenced by `init`
+RULE_CATEGORIES = ("architecture", "conventions", "testing")
+RULES_SOFT_CAP = 12          # per category; above this, maintenance says combine/prune
+RULE_STALE_DAYS = 90         # rules older than this get flagged for a re-check
+TREE_MAX_DEPTH = 3           # repo map: directories deeper than this are collapsed
+TREE_MAX_ENTRIES = 12        # repo map: entries shown per directory
 
 
 # ---------- small helpers ----------
@@ -95,12 +100,37 @@ def tip(msg):
     print(f"next: {msg}")
 
 
+# ---------- state (single file: agents.json; scratch: agents.scratch.json) ----------
+
 def load_config():
-    cfg = load_json(CONFIG_PATH, default=None)
+    """All durable harness state. Top-level keys are independent sections so
+    future harness versions can add more without migrations."""
+    try:
+        cfg = load_json(CONFIG_PATH, default=None)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        die(f".agents/agents.json is not valid JSON: {e}. "
+            "Restore it from git history — never hand-edit it.")
     if cfg is None:
-        cfg = {"commands": {}}
-    cfg.setdefault("commands", {})
+        cfg = {}
+    for key, default in (("commands", {}), ("features", []),
+                         ("progress", []), ("rules", [])):
+        cfg.setdefault(key, default)
     return cfg
+
+
+def save_config(cfg):
+    save_json(CONFIG_PATH, cfg)
+
+
+def load_scratch():
+    try:
+        return load_json(SCRATCH_PATH, default=None) or {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {}  # scratch is disposable; a corrupt one is treated as absent
+
+
+def save_scratch(data):
+    save_json(SCRATCH_PATH, data)
 
 
 def setup_pending(cfg=None):
@@ -108,16 +138,8 @@ def setup_pending(cfg=None):
     return (cfg or load_config()).get("setup")
 
 
-def load_features():
-    data = load_json(FEATURES_PATH, default=None)
-    if data is None:
-        data = {"features": []}
-    data.setdefault("features", [])
-    return data
-
-
-def find_feature(data, fid):
-    for f in data["features"]:
+def find_feature(feats, fid):
+    for f in feats:
         if f.get("id") == fid:
             return f
     return None
@@ -133,7 +155,7 @@ def fmt_feature(f):
 # ---------- structure / state checks ----------
 
 def collect_problems():
-    """Return (fails, warns) about harness structure and state files."""
+    """Return (fails, warns) about harness structure and state."""
     fails, warns = [], []
 
     def need_file(rel):
@@ -150,26 +172,23 @@ def collect_problems():
     need_link(".claude/skills")
     need_file(".github/copilot-instructions.md")
     need_file(".agents/agents.json")
-    need_file(".agents/state/progress.json")
-    need_file(".agents/state/feature_list.json")
 
-    for rel, path in ((".agents/agents.json", CONFIG_PATH),
-                      (".agents/state/progress.json", PROGRESS_PATH),
-                      (".agents/state/feature_list.json", FEATURES_PATH)):
-        if os.path.isfile(path):
-            try:
-                load_json(path)
-            except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                fails.append(f"{rel} is not valid JSON: {e}")
-
-    try:
-        feats = load_features()["features"]
-        wip = [f for f in feats if f.get("status") == "in_progress"]
+    cfg = None
+    if os.path.isfile(CONFIG_PATH):
+        try:
+            cfg = load_json(CONFIG_PATH)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            fails.append(f".agents/agents.json is not valid JSON: {e}")
+    if isinstance(cfg, dict):
+        wip = [f for f in cfg.get("features", []) if f.get("status") == "in_progress"]
         if len(wip) > 1:
             warns.append("%d features in_progress (policy: max 1): %s"
                          % (len(wip), ", ".join(f.get("id", "?") for f in wip)))
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        pass  # already reported as a fail above
+        for cat in RULE_CATEGORIES:
+            n = sum(1 for r in cfg.get("rules", []) if r.get("category") == cat)
+            if n > RULES_SOFT_CAP:
+                warns.append(f"{n} {cat} rules (soft cap {RULES_SOFT_CAP}) — "
+                             f"combine/prune: {SCRIPT} maintenance")
 
     if os.path.isdir(SKILLS_DIR):
         for name in sorted(os.listdir(SKILLS_DIR)):
@@ -244,26 +263,17 @@ def _check_commands():
     return False, "no --verify commands registered"
 
 
-def _check_docs():
-    leftover = []
-    for dirpath, _dirs, files in os.walk(DOCS_DIR):
-        for fn in files:
-            if not fn.endswith(".md"):
-                continue
-            p = os.path.join(dirpath, fn)
-            try:
-                with open(p, encoding="utf-8") as fh:
-                    if SETUP_MARKER in fh.read():
-                        leftover.append(os.path.relpath(p, ROOT))
-            except OSError:
-                pass
-    if leftover:
-        return False, f"{SETUP_MARKER} left in: {', '.join(leftover)}"
-    return True, "docs have no setup markers left"
+def _check_rules():
+    rules = load_config()["rules"]
+    missing = [c for c in RULE_CATEGORIES
+               if not any(r.get("category") == c for r in rules)]
+    if missing:
+        return False, "no rules yet for: " + ", ".join(missing)
+    return True, "rules cover " + ", ".join(RULE_CATEGORIES)
 
 
 def _check_scope():
-    feats = load_features()["features"]
+    feats = load_config()["features"]
     rest = [f for f in feats if f.get("id") != "F-000"]
     if rest:
         return True, f"{len(rest)} feature(s) seeded"
@@ -273,7 +283,7 @@ def _check_scope():
 SETUP_STEPS = [
     ("project", "Project identity (AGENTS.md + README.md)", f"""\
 1. Fill '## Project' in AGENTS.md: name, stack, purpose (2-4 lines).
-   Remove its {SETUP_MARKER} comment. Add source-dir rows to the repo map.
+   Remove its {SETUP_MARKER} comment.
 2. Rewrite README.md for the actual project (template text is placeholder).
 Infer from the codebase first (code, lockfiles, configs, CI); ask the user
 only what you cannot infer (purpose, planned stack on an empty repo).""",
@@ -293,13 +303,15 @@ Repo has no code yet? Delete that CI comment block anyway, add a feature
   {SCRIPT} setup done commands --force""",
      _check_commands),
 
-    ("docs", "Fill deep-dive docs", f"""\
-Fill the {SETUP_MARKER} markers in:
-  .agents/docs/architecture.md   modules, data flow, key dirs
-  .agents/docs/conventions.md    naming, formatting, commit style
-  .agents/docs/testing.md        how to run/write tests, expectations
-Delete sections that don't apply; "nothing yet" is a fine answer.""",
-     _check_docs),
+    ("rules", "Record project rules (architecture / conventions / testing)", f"""\
+Record what an agent must know — one terse rule per call:
+  {SCRIPT} docs add architecture "<modules, data flow, key dirs>"
+  {SCRIPT} docs add conventions "<naming, style, commit format>"
+  {SCRIPT} docs add testing "<how to run tests, expectations>"
+Infer from the codebase. Nothing to record yet (e.g. no tests)? Record that
+fact as the rule. At least one rule per category. The repo map is generated
+live by `{SCRIPT} docs` — no need to describe the file tree.""",
+     _check_rules),
 
     ("scope", "Seed the feature list", f"""\
 Agree initial features with the user, then:
@@ -308,7 +320,7 @@ One entry per feature, smallest shippable units first.""",
      _check_scope),
 
     ("guardrails", "Project rules + .gitignore", f"""\
-1. Add project-specific rules / no-go zones to '## Rules' in AGENTS.md
+1. Add project-specific no-go zones to '## Rules' in AGENTS.md
    (e.g. "never edit /migrations"). Remove its {SETUP_MARKER} comment.
 2. Review .gitignore for the stack; replace its {SETUP_MARKER} line.
 Manual step — when finished, mark it:
@@ -345,23 +357,22 @@ def setup_finalize(cfg):
         tip(f"fix the blockers, then rerun: {SCRIPT} setup")
         sys.exit(1)
 
-    feats = load_features()
-    f000 = find_feature(feats, "F-000")
+    f000 = find_feature(cfg["features"], "F-000")
     if f000:
         f000["status"] = "done"
-        save_json(FEATURES_PATH, feats)
     del cfg["setup"]
-    save_json(CONFIG_PATH, cfg)
-    append_log_entry({
+    cfg["progress"].append({
         "date": now_utc(),
         "title": "project setup",
-        "done": "setup complete: %d command(s) registered, %d feature(s) seeded"
+        "done": "setup complete: %d command(s) registered, %d feature(s) seeded, %d rule(s) recorded"
                 % (len(cfg["commands"]),
-                   len([f for f in feats["features"] if f.get("id") != "F-000"])),
+                   len([f for f in cfg["features"] if f.get("id") != "F-000"]),
+                   len(cfg["rules"])),
         "verified": verified_note(),
         "blockers": "none",
         "feature": "F-000",
     })
+    save_config(cfg)
     print("== setup COMPLETE (progress entry written, F-000 closed) ==")
     tip("commit everything: git commit -m 'chore: complete project setup'; push if expected")
     tip(f"then start the first feature: {SCRIPT} feature start <id>")
@@ -387,7 +398,7 @@ def cmd_setup(args):
                 die(f"step '{args.step}' not done: {detail}. Fix it, or override with --force.")
         if args.step not in state["done"]:
             state["done"].append(args.step)
-            save_json(CONFIG_PATH, cfg)
+            save_config(cfg)
         print(f"step '{args.step}' recorded.")
 
     # Status, plus full instructions for the first pending step only —
@@ -402,7 +413,7 @@ def cmd_setup(args):
             ok, detail = check()
             if ok:
                 state["done"].append(name)
-                save_json(CONFIG_PATH, cfg)
+                save_config(cfg)
                 print(f"  [ok] {name}: {summary} — auto-detected ({detail})")
                 continue
             print(f"  [..] {name}: {summary} — {detail}")
@@ -437,18 +448,6 @@ def render_entry(e, indent="  "):
     return "\n".join(lines)
 
 
-def progress_entries():
-    data = load_json(PROGRESS_PATH, default=None) or {}
-    return data.get("entries", [])
-
-
-def append_log_entry(entry):
-    data = load_json(PROGRESS_PATH, default=None) or {}
-    data.setdefault("entries", [])
-    data["entries"].append(entry)
-    save_json(PROGRESS_PATH, data)
-
-
 # ---------- init / verify / check / ci ----------
 
 def cmd_init(_args):
@@ -479,32 +478,38 @@ def cmd_init(_args):
     if not skills:
         print("  (none)")
 
+    print("-- project docs --")
+    rules = cfg["rules"]
+    if rules:
+        counts = ", ".join(
+            f"{sum(1 for r in rules if r.get('category') == c)} {c}"
+            for c in RULE_CATEGORIES)
+        print(f"  rules: {counts}  (read before coding: {SCRIPT} docs)")
+    else:
+        print(f"  no rules recorded — {SCRIPT} docs add <category> \"<rule>\"")
+
     print("-- git --")
     print(git("status", "--short", "--branch") or "(not a git checkout)")
     print(git("log", "--oneline", "-5") or "(no commits yet)")
 
     print("-- scope --")
-    wip, nxt = [], None
-    try:
-        feats = load_features()["features"]
-        wip = [f for f in feats if f.get("status") == "in_progress"]
-        todo = [f for f in feats if f.get("status") == "todo"]
-        blocked = [f for f in feats if f.get("status") == "blocked"]
-        nxt = todo[0] if todo else None
-        if wip:
-            print(f"in_progress: {fmt_feature(wip[0])}")
-        elif nxt:
-            print(f"nothing in_progress. Next todo: {fmt_feature(nxt)}")
-        else:
-            print("nothing in_progress, no todos left.")
-        if blocked:
-            print(f"blocked: {len(blocked)} "
-                  f"({', '.join(f.get('id', '?') for f in blocked)})")
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        pass  # reported under structure
+    feats = cfg["features"]
+    wip = [f for f in feats if f.get("status") == "in_progress"]
+    todo = [f for f in feats if f.get("status") == "todo"]
+    blocked = [f for f in feats if f.get("status") == "blocked"]
+    nxt = todo[0] if todo else None
+    if wip:
+        print(f"in_progress: {fmt_feature(wip[0])}")
+    elif nxt:
+        print(f"nothing in_progress. Next todo: {fmt_feature(nxt)}")
+    else:
+        print("nothing in_progress, no todos left.")
+    if blocked:
+        print(f"blocked: {len(blocked)} "
+              f"({', '.join(f.get('id', '?') for f in blocked)})")
 
     print("-- progress --")
-    entries = progress_entries()
+    entries = cfg["progress"]
     open_blocker = None
     if entries:
         latest = entries[-1]
@@ -590,12 +595,14 @@ def cmd_verify(_args):
 
 
 def record_verify(result, failed=None):
-    save_json(LAST_VERIFY_PATH, {
+    scratch = load_scratch()
+    scratch["last_verify"] = {
         "result": result,
         "failed_step": failed,
         "date": now_utc(),
         "head": git("rev-parse", "--short", "HEAD") or None,
-    })
+    }
+    save_scratch(scratch)
 
 
 def cmd_check(_args):
@@ -607,7 +614,7 @@ def cmd_check(_args):
     if fails:
         print("== check FAILED ==")
         sys.exit(1)
-    print("== check OK: harness structure and state files valid ==")
+    print("== check OK: harness structure and state valid ==")
 
 
 def cmd_ci(args):
@@ -622,7 +629,7 @@ def cmd_ci(args):
 # ---------- log / progress / handoff ----------
 
 def verified_note():
-    lv = load_json(LAST_VERIFY_PATH, default=None)
+    lv = load_scratch().get("last_verify")
     if not lv:
         return "unverified (no verify run recorded)"
     note = f"{lv.get('result', '?')} ({lv.get('date', '?')} @ {lv.get('head') or 'no-commit'})"
@@ -635,6 +642,7 @@ def verified_note():
 
 
 def cmd_log(args):
+    cfg = load_config()
     entry = {
         "date": now_utc(),
         "title": args.title,
@@ -647,22 +655,23 @@ def cmd_log(args):
         entry["next"] = args.next
     entry["blockers"] = args.blockers or "none"
     if args.feature:
-        if find_feature(load_features(), args.feature) is None:
+        if find_feature(cfg["features"], args.feature) is None:
             print(f"WARN: feature '{args.feature}' not in feature list; logging anyway.")
         entry["feature"] = args.feature
     head = git("rev-parse", "--short", "HEAD")
     if head:
         entry["commit"] = head + (" (+ uncommitted changes)" if git("status", "--porcelain") else "")
-    append_log_entry(entry)
+    cfg["progress"].append(entry)
+    save_config(cfg)
     print("Logged:")
     print(render_entry(entry))
     if args.blockers:
         tip(f"if a feature is stuck on this, record it: {SCRIPT} feature block <id> --notes \"{args.blockers}\"")
-    tip("commit state files together with the feature")
+    tip("commit .agents/agents.json together with the feature")
 
 
 def cmd_progress(args):
-    entries = progress_entries()
+    entries = load_config()["progress"]
     if not entries:
         print(f"No progress entries yet. Record work with: {SCRIPT} log")
         return
@@ -679,6 +688,7 @@ def cmd_progress(args):
 def cmd_handoff(_args):
     """End-of-session checklist; state on disk beats memory in context."""
     print("== handoff: end-of-session checklist ==")
+    cfg = load_config()
     todo = 0
 
     def item(ok, label, detail):
@@ -687,7 +697,7 @@ def cmd_handoff(_args):
         print(f"  [{'ok' if ok else '..'}] {label}: {detail}")
 
     head = git("rev-parse", "--short", "HEAD") or None
-    lv = load_json(LAST_VERIFY_PATH, default=None)
+    lv = load_scratch().get("last_verify")
     if lv is None:
         item(False, "verify", f"no run recorded — run: {SCRIPT} verify")
     elif lv.get("result") != "pass":
@@ -698,7 +708,7 @@ def cmd_handoff(_args):
     else:
         item(True, "verify", f"pass ({lv.get('date')})")
 
-    entries = progress_entries()
+    entries = cfg["progress"]
     today = now_utc()[:10]
     latest = entries[-1] if entries else None
     if latest and latest.get("date", "").startswith(today):
@@ -708,7 +718,7 @@ def cmd_handoff(_args):
                            "--done \"...\" --next \"...\" (caveman style; cover what shipped, "
                            "known issues, next step, blockers)")
 
-    wip = [f for f in load_features()["features"] if f.get("status") == "in_progress"]
+    wip = [f for f in cfg["features"] if f.get("status") == "in_progress"]
     if wip:
         fid = wip[0].get("id")
         item(False, "scope", f"{fid} still in_progress — {SCRIPT} feature done {fid}, "
@@ -717,7 +727,7 @@ def cmd_handoff(_args):
         item(True, "scope", "no feature left in_progress")
 
     if git("status", "--porcelain"):
-        item(False, "commit", "working tree dirty — commit (state files included); "
+        item(False, "commit", "working tree dirty — commit (.agents/agents.json included); "
                               "half-done work → 'wip:' commit on a feature branch")
     else:
         item(True, "commit", "working tree clean")
@@ -731,7 +741,7 @@ def cmd_handoff(_args):
         item(True, "push", "no upstream configured (skip)")
 
     print("also consider:")
-    print("  - durable decision made this session → one line in .agents/docs/architecture.md")
+    print(f"  - learned a durable fact this session → {SCRIPT} docs add <category> \"<rule>\"")
     print("  - repeated a multi-step procedure → capture a skill (.agents/skills/new-skill/SKILL.md)")
     print(f"  - commands/stack changed → {SCRIPT} cmd set ... + sync CI toolchain (.github/workflows/agents.yml)")
     if todo:
@@ -743,8 +753,8 @@ def cmd_handoff(_args):
 # ---------- feature ----------
 
 def cmd_feature(args):
-    data = load_features()
-    feats = data["features"]
+    cfg = load_config()
+    feats = cfg["features"]
 
     if args.action == "list":
         by = {"in_progress": [], "todo": [], "blocked": [], "done": []}
@@ -774,20 +784,20 @@ def cmd_feature(args):
             nums = [int(m.group(1)) for f in feats
                     for m in [re.match(r"F-(\d+)$", f.get("id", ""))] if m]
             fid = f"F-{(max(nums) + 1 if nums else 1):03d}"
-        if find_feature(data, fid):
+        if find_feature(feats, fid):
             die(f"feature id '{fid}' already exists")
         f = {"id": fid, "title": args.title, "status": "todo"}
         if args.notes:
             f["notes"] = args.notes
         feats.append(f)
-        save_json(FEATURES_PATH, data)
+        save_config(cfg)
         print(f"Added: {fmt_feature(f)}")
         return
 
     # remaining actions operate on an existing id
     if not args.title:
         die(f"feature {args.action} needs an id, e.g.: feature {args.action} F-001")
-    f = find_feature(data, args.title)
+    f = find_feature(feats, args.title)
     if f is None:
         die(f"no feature with id '{args.title}' (see: feature list --all)")
 
@@ -809,7 +819,7 @@ def cmd_feature(args):
         if not args.notes:
             die("feature note needs --notes \"text\"")
         f["notes"] = args.notes
-    save_json(FEATURES_PATH, data)
+    save_config(cfg)
     print(f"{f['id']} -> {f['status']}" + (f" ({f['notes']})" if f.get("notes") else ""))
     if args.action == "start":
         tip(f"implement {f['id']}; stay in scope. Done means: {SCRIPT} verify green")
@@ -817,6 +827,208 @@ def cmd_feature(args):
         nxt = next((x for x in feats if x.get("status") == "todo"), None)
         tip(f"{SCRIPT} handoff — log + commit"
             + (f"; next todo after that: {nxt['id']} — {nxt['title']}" if nxt else ""))
+
+
+# ---------- docs: generated repo map + curated rules ----------
+
+def _tree_file_count(node):
+    n = 0
+    for child in node.values():
+        n += 1 if child is None else _tree_file_count(child)
+    return n
+
+
+def repo_tree_lines():
+    """Bounded file tree from git ls-files — always current, never hand-kept."""
+    out = git("ls-files")
+    if not out:
+        return ["(no tracked files — not a git checkout?)"]
+    tree = {}
+    for path in out.splitlines():
+        parts = path.split("/")
+        node = tree
+        for part in parts[:-1]:
+            node = node.setdefault(part + "/", {})
+        node[parts[-1]] = None
+
+    lines = ["."]
+
+    def render(node, prefix, depth):
+        entries = sorted(node.items(),
+                         key=lambda kv: (not kv[0].endswith("/"), kv[0]))
+        shown = entries[:TREE_MAX_ENTRIES]
+        hidden = len(entries) - len(shown)
+        for i, (name, child) in enumerate(shown):
+            last = i == len(shown) - 1 and hidden == 0
+            branch = "└── " if last else "├── "
+            cont = "    " if last else "│   "
+            if child is None:
+                lines.append(prefix + branch + name)
+            elif depth + 1 >= TREE_MAX_DEPTH:
+                count = _tree_file_count(child)
+                lines.append(f"{prefix}{branch}{name} ({count} file{'s' if count != 1 else ''})")
+            else:
+                lines.append(prefix + branch + name)
+                render(child, prefix + cont, depth + 1)
+        if hidden:
+            lines.append(prefix + f"└── … +{hidden} more")
+
+    render(tree, "", 0)
+    return lines
+
+
+def cmd_docs(args):
+    cfg = load_config()
+    rules = cfg["rules"]
+
+    if args.action == "add":
+        if args.target not in RULE_CATEGORIES:
+            die(f"docs add needs a category: {' | '.join(RULE_CATEGORIES)}")
+        if not args.text:
+            die('docs add needs the rule text: docs add <category> "<rule>"')
+        if len(args.text) > 160:
+            print("WARN: long rule — caveman style, split or trim if possible.")
+        nums = [int(m.group(1)) for r in rules
+                for m in [re.match(r"R-(\d+)$", r.get("id", ""))] if m]
+        rule = {
+            "id": f"R-{(max(nums) + 1 if nums else 1):03d}",
+            "category": args.target,
+            "text": args.text,
+            "added": now_utc()[:10],
+        }
+        rules.append(rule)
+        save_config(cfg)
+        print(f"Added {rule['id']} [{rule['category']}]: {rule['text']}")
+        n = sum(1 for r in rules if r.get("category") == args.target)
+        if n > RULES_SOFT_CAP:
+            print(f"WARN: {n} {args.target} rules (soft cap {RULES_SOFT_CAP}) — "
+                  f"combine overlapping ones, rm stale ones: {SCRIPT} maintenance")
+        return
+
+    if args.action == "rm":
+        if not args.target:
+            die("docs rm needs a rule id, e.g.: docs rm R-003")
+        kept = [r for r in rules if r.get("id") != args.target]
+        if len(kept) == len(rules):
+            die(f"no rule with id '{args.target}' (see: {SCRIPT} docs)")
+        cfg["rules"] = kept
+        save_config(cfg)
+        print(f"Removed {args.target}.")
+        return
+
+    # show
+    print("== docs: live repo map + curated rules ==")
+    print("-- repo map (generated from git ls-files; collapsed dirs show file counts) --")
+    for line in repo_tree_lines():
+        print(line)
+    print("-- rules --")
+    for cat in RULE_CATEGORIES:
+        in_cat = [r for r in rules if r.get("category") == cat]
+        print(f"{cat}:")
+        for r in in_cat:
+            print(f"  {r.get('id', '?')}: {r.get('text', '?')}")
+        if not in_cat:
+            print(f"  (none — add: {SCRIPT} docs add {cat} \"<rule>\")")
+    tip(f"learned a durable fact → {SCRIPT} docs add <category> \"<rule>\" (terse, one fact per rule)")
+
+
+# ---------- maintenance ----------
+
+def cmd_maintenance(_args):
+    """Health sweep: suggest what to update, combine, prune, or re-check."""
+    cfg = load_config()
+    if setup_pending(cfg) is not None:
+        print(f"Project setup incomplete — finish it first: {SCRIPT} setup")
+        sys.exit(1)
+
+    print("== maintenance: harness + knowledge health ==")
+    flagged = 0
+
+    def item(ok, label, detail):
+        nonlocal flagged
+        flagged += 0 if ok else 1
+        print(f"  [{'ok' if ok else '..'}] {label}: {detail}")
+
+    print("-- structure --")
+    fails, warns = collect_problems()
+    for f in fails:
+        item(False, "structure", f)
+    for w in warns:
+        item(False, "structure", w)
+    if not fails and not warns:
+        item(True, "structure", "no FAILs or WARNs")
+
+    print("-- rules (project docs) --")
+    rules = cfg["rules"]
+    for cat in RULE_CATEGORIES:
+        in_cat = [r for r in rules if r.get("category") == cat]
+        if not in_cat:
+            item(False, cat, f"0 rules — record at least one: {SCRIPT} docs add {cat} \"<rule>\"")
+        elif len(in_cat) > RULES_SOFT_CAP:
+            item(False, cat, f"{len(in_cat)} rules (soft cap {RULES_SOFT_CAP}) — combine "
+                             f"overlapping, rm stale: {SCRIPT} docs rm <id>")
+        else:
+            item(True, cat, f"{len(in_cat)} rule(s)")
+    stale = []
+    now = datetime.now(timezone.utc)
+    for r in rules:
+        try:
+            added = datetime.strptime(r.get("added", ""), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        if (now - added).days > RULE_STALE_DAYS:
+            stale.append(r.get("id", "?"))
+    if stale:
+        item(False, "stale rules", f"{len(stale)} older than {RULE_STALE_DAYS} days "
+                                   f"({', '.join(stale)}) — spot-check against the code; "
+                                   "still true → rm + re-add to refresh the date; drifted → fix or rm")
+    else:
+        item(True, "stale rules", f"none older than {RULE_STALE_DAYS} days")
+
+    print("-- scope --")
+    feats = cfg["features"]
+    blocked = [f for f in feats if f.get("status") == "blocked"]
+    if blocked:
+        item(False, "blocked", f"{len(blocked)} feature(s) blocked "
+                               f"({', '.join(f.get('id', '?') for f in blocked)}) — "
+                               "unblock, re-scope, or close with the user")
+    else:
+        item(True, "blocked", "no blocked features")
+    done = sum(1 for f in feats if f.get("status") == "done")
+    print(f"  (info) features: {done} done / {len(feats)} total; "
+          f"progress entries: {len(cfg['progress'])} (append-only, display bounded — leave as is)")
+
+    print("-- skills --")
+    skills = list_skills()
+    if skills:
+        item(False, "skills", f"{len(skills)} skill(s) — reread each SKILL.md: commands still "
+                              "exist? steps still match the code? Fix or delete drifted ones")
+    else:
+        item(True, "skills", "none to review")
+
+    print("-- commands / CI --")
+    wf = os.path.join(ROOT, ".github", "workflows", "agents.yml")
+    try:
+        with open(wf, encoding="utf-8") as fh:
+            ci_ok = "agents.sh ci" in fh.read()
+    except OSError:
+        ci_ok = False
+    if ci_ok:
+        item(True, "ci", ".github/workflows/agents.yml runs ./agents.sh ci")
+    else:
+        item(False, "ci", ".github/workflows/agents.yml missing or doesn't run ./agents.sh ci")
+    item(False, "commands", f"reread {SCRIPT} cmd list — every command still real? "
+                            f"definition of done still complete? Then run: {SCRIPT} verify")
+
+    print("-- manual sweep --")
+    print("  - AGENTS.md '## Project' and '## Rules' still accurate?")
+    print("  - README.md still describes the actual project?")
+    print("  - .gitignore still matches the stack?")
+
+    print(f"== maintenance: {flagged} item(s) to act on above ==")
+    tip(f"fix small items now; bigger ones → {SCRIPT} feature add \"maintenance: <what>\"")
+    if fails:
+        sys.exit(1)
 
 
 # ---------- cmd / run ----------
@@ -843,7 +1055,7 @@ def cmd_cmd(args):
         if args.name not in cmds:
             die(f"no command named '{args.name}'")
         del cmds[args.name]
-        save_json(CONFIG_PATH, cfg)
+        save_config(cfg)
         print(f"Removed '{args.name}'.")
         return
 
@@ -861,7 +1073,7 @@ def cmd_cmd(args):
         entry["desc"] = args.desc
     existed = args.name in cmds
     cmds[args.name] = entry  # keeps position if existing, appends if new
-    save_json(CONFIG_PATH, cfg)
+    save_config(cfg)
     flags = "".join(f" [{f}]" for f in ("verify", "init") if entry.get(f))
     print(f"{'Updated' if existed else 'Registered'} {args.name}: {args.command}{flags}")
     if args.verify or args.init:
@@ -892,8 +1104,8 @@ session lifecycle:
   4. {SCRIPT} verify                definition of done; green = done, red = not done
   5. {SCRIPT} handoff               checklist: log entry, close feature, commit, push
 
-State lives in .agents/ and is owned by this script — manage it through these
-subcommands, never by hand-editing the JSON files. Each subcommand has --help.""",
+State lives in .agents/agents.json and is owned by this script — manage it
+through these subcommands, never by hand-editing. Each subcommand has --help.""",
     )
     sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
 
@@ -932,8 +1144,8 @@ When every step is done, setup runs the final gates and lifts setup mode.""")
 example:
   {SCRIPT} log "auth feature" --done "JWT login in src/auth/" \\
       --issues "refresh tokens untested" --next "wire logout" --feature F-002
-Terse caveman style (.agents/docs/token-efficiency.md). Storage and history
-are handled for you; nothing to compact or archive.""")
+Terse caveman style (AGENTS.md '## Style'). Storage and history are handled
+for you; nothing to compact or archive.""")
     lg.add_argument("title", help="short entry title")
     lg.add_argument("--done", required=True, help="what shipped (paths, behavior)")
     lg.add_argument("--issues", help="broken/known issues: facts, exact errors")
@@ -962,6 +1174,27 @@ examples:
     ft.add_argument("--id", help="explicit id for add (default: next F-NNN)")
     ft.add_argument("--notes", help="notes text (add/block/note)")
     ft.add_argument("--all", action="store_true", help="list: include done features")
+
+    dc = add("docs", cmd_docs,
+             "live project docs: generated repo map + curated rules "
+             "(architecture / conventions / testing)",
+             epilog=f"""\
+examples:
+  {SCRIPT} docs                                     repo map + all rules
+  {SCRIPT} docs add conventions "commits: imperative, <=72 chars"
+  {SCRIPT} docs rm R-003
+The repo map is generated from git ls-files, so it never drifts. Rules are
+the curated part: one terse fact each, added when learned, pruned when stale
+(`{SCRIPT} maintenance` flags categories that grow past {RULES_SOFT_CAP}).""")
+    dc.add_argument("action", nargs="?", choices=["show", "add", "rm"], default="show")
+    dc.add_argument("target", nargs="?",
+                    help="category (for add: %s) or rule id (for rm)"
+                         % " | ".join(RULE_CATEGORIES))
+    dc.add_argument("text", nargs="?", help="rule text (for add)")
+
+    add("maintenance", cmd_maintenance,
+        "health sweep for an upkeep session: flags rules to combine/prune, blocked "
+        "features, skills and commands to re-check, docs to refresh")
 
     cm = add("cmd", cmd_cmd,
              "register project commands (build/test/lint/dev) — data, not script edits",

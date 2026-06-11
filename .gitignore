@@ -2,7 +2,7 @@
 .claude/settings.local.json
 
 # Harness scratch state (per-checkout, written by ./agents.sh verify)
-.agents/state/last_verify.json
+.agents/agents.scratch.json
 
 # Python/cache noise
 __pycache__/

@@ -13,7 +13,7 @@ Claude Code discovers them via the `.claude/skills` symlink.
 - Task will recur (release, deploy, codegen, data migration, report).
 - Task has non-obvious steps or ordering that cost effort to figure out.
 - You (the agent) just did such a task — create the skill now, unprompted.
-  The session-handoff playbook has a skill sweep step for exactly this.
+  `./agents.sh handoff` reminds you to sweep for exactly this.
 
 Don't create for one-offs or things AGENTS.md already covers in 2 lines.
 
@@ -50,5 +50,5 @@ Constraints, failure modes, what NOT to do.
 - Body ≤ ~80 lines. Longer → split details into extra files in the skill dir,
   reference them from SKILL.md (progressive disclosure).
 - Commands copy-pasteable from repo root.
-- Caveman style (see `.agents/docs/token-efficiency.md`).
+- Caveman style (see AGENTS.md '## Style').
 - Test: could a fresh agent with zero conversation context execute it? If no, fix.

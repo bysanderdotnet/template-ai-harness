@@ -23,7 +23,7 @@ Use the root wrapper for all harness operations:
 `agents.sh` finds an available Python interpreter and forwards every argument to
 the stdlib-only harness CLI in `.agents/agents.py`. Agents and humans should use
 the wrapper instead of reaching into `.agents/` directly; the implementation and
-state files there are intended to be harness internals.
+state there are harness internals.
 
 ## What's inside
 
@@ -41,20 +41,10 @@ GEMINI.md -> AGENTS.md     Gemini CLI entrypoint (symlink)
 .agents/
 ├── README.md              Map of harness internals + design principles
 ├── agents.py              Harness CLI implementation; use ./agents.sh --help
-├── agents.json            Setup progress + registered project commands
-├── docs/
-│   ├── architecture.md    Modules, data flow, decision log
-│   ├── conventions.md     Code style, commits, branches
-│   ├── testing.md         How to run/write tests
-│   ├── token-efficiency.md  Terse style rules for agent-to-agent state
-│   └── reference/         Distilled harness-engineering research + sources
-├── skills/
-│   ├── bootstrap-project/ Pointer to guided setup (./agents.sh setup)
-│   ├── session-handoff/   Pointer to the handoff checklist (./agents.sh handoff)
-│   └── new-skill/         How to author new skills
-└── state/
-    ├── progress.json      Append-only session log (via ./agents.sh log)
-    └── feature_list.json  Scope contract (via ./agents.sh feature ...)
+├── agents.json            All durable state: commands, features, progress log, rules
+├── agents.scratch.json    Transient scratch (gitignored; last verify result)
+└── skills/
+    └── new-skill/         How to author new skills (projects grow their own)
 ```
 
 ## One wrapper guides the workflow
@@ -66,9 +56,11 @@ tells the agent what to do next at every step.
 | Subcommand | Job |
 |---|---|
 | `setup` | Guided first-time configuration: shows status and current step instructions; final gates run automatically |
-| `init` | Session start: health check, skills index, git status, current feature, recent progress, and a concrete next step |
+| `init` | Session start: health check, skills index, rule counts, git status, current feature, recent progress, and a concrete next step |
 | `verify` | Definition of done: runs registered `--verify` commands in order and records the result |
 | `handoff` | End-of-session checklist with live status: verify fresh? progress logged? feature closed? committed? pushed? |
+| `docs` | Live project docs: a repo map generated from `git ls-files` (never drifts) + curated rules for architecture, conventions, and testing |
+| `maintenance` | Upkeep sweep: flags rule categories to combine/prune, stale rules, blocked features, skills and commands to re-check |
 | `cmd set/rm/list`, `run` | Command registry: agents register build/test/lint/dev commands instead of editing harness scripts |
 | `feature list/add/start/done/block` | Scope tracking; enforces one feature in progress |
 | `log`, `progress` | Session log: entries auto-stamped with date, commit, and last verify result |
@@ -78,6 +70,15 @@ Agents never need to know where state lives or hand-edit JSON. Adding a test
 step to a project is `./agents.sh cmd set test "npm test" --verify`, not a
 script rewrite. All subcommand documentation lives in `--help`, so the manual
 never drifts from the tool.
+
+## Project docs that don't rot
+
+Static architecture documents drift from the code. Here the repo map is
+generated live (`./agents.sh docs`), and only the part worth curating is
+stored: terse rules, added one fact at a time as agents learn them
+(`./agents.sh docs add conventions "..."`). The harness tracks rule counts and
+age; `./agents.sh maintenance` tells an agent doing an upkeep session exactly
+what to combine, prune, or re-validate.
 
 ## Works with
 
@@ -95,14 +96,15 @@ playbooks at session start.
 ## Design principles
 
 Based on harness-engineering research (OpenAI, Anthropic,
-[learn-harness-engineering](https://github.com/walkinglabs/learn-harness-engineering));
-distilled with sources in `.agents/docs/reference/harness-principles.md`.
+[learn-harness-engineering](https://github.com/walkinglabs/learn-harness-engineering)).
 
-1. **Instructions** — `AGENTS.md` stays short and links out; detail lives in
-   `./agents.sh --help` and docs loaded on demand.
-2. **State** — progress, features, commands, and setup state live on disk behind
-   the CLI, so sessions resume without cold start.
+1. **Instructions** — `AGENTS.md` stays short; detail lives in
+   `./agents.sh --help`, loaded on demand.
+2. **State** — one JSON file behind the CLI, so sessions resume without cold
+   start and agents can't corrupt state by hand-editing.
 3. **Verification** — done means `./agents.sh verify` is green.
 4. **Scope** — one feature at a time, tracked by the CLI and committed alone.
 5. **Handoff** — end sessions with an explicit checklist, progress log, and
    clean git state.
+6. **Maintenance** — generated docs never drift; curated rules are kept small
+   by an explicit upkeep loop.

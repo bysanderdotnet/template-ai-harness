@@ -11,8 +11,10 @@ Copilot surfaces that cannot open repository files.
 - Done means `./agents.sh verify` exits 0. No green run, no "done".
 - Session end: `./agents.sh handoff` — clear every open item.
 - One feature per session/commit. No drive-by refactors.
-- State (session log, feature list) is managed through the CLI (`log`,
-  `feature ...`) — never hand-edit `.agents/` JSON files.
+- State (session log, feature list, rules) is managed through the CLI (`log`,
+  `feature ...`, `docs ...`) — never hand-edit `.agents/agents.json`.
+- Project knowledge: `./agents.sh docs` shows a generated repo map + curated
+  rules (architecture / conventions / testing). Read it before coding.
 - Project commands are registered, not hardcoded:
   `./agents.sh cmd set <name> "<cmd>" [--verify|--init]`.
 - Treat `.agents/agents.py` and `agents.sh` as harness internals; use

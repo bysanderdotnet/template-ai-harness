@@ -1,5 +1,5 @@
 {
-  "$comment": "Harness config, owned by the harness CLI — do not hand-edit. 'setup' tracks guided first-time setup (`./agents.sh setup`) and is removed when setup completes. 'commands' is the registry managed by `./agents.sh cmd set/rm`: verify = definition of done step (run by `verify`, in listed order, cheap/fast first); init = session-start smoke check.",
+  "$comment": "All durable harness state, owned by the CLI (./agents.sh) — never hand-edit. Keys: commands (via `cmd set/rm`; verify = definition-of-done step, init = session-start check), features (via `feature ...`; max one in_progress, never delete — mark done), progress (via `log`; append-only, display bounded by the CLI), rules (via `docs add/rm`; curated project knowledge), setup (present only while guided setup is pending). Future harness versions may add top-level keys. Transient scratch lives in agents.scratch.json (gitignored).",
   "commands": {
     "wrapper-syntax": {
       "run": "sh -n agents.sh",
@@ -13,5 +13,131 @@
       "run": "./agents.sh check",
       "verify": true
     }
-  }
+  },
+  "features": [
+    {
+      "id": "F-000",
+      "title": "Complete guided project setup",
+      "status": "done",
+      "notes": "Run: ./agents.sh setup — auto-closed when setup finalizes."
+    },
+    {
+      "id": "F-001",
+      "title": "Add root harness wrapper",
+      "status": "done",
+      "notes": "Expose ./agents.sh, keep .agents internals abstracted, update docs."
+    },
+    {
+      "id": "F-002",
+      "title": "Audit agents.sh transition",
+      "status": "done",
+      "notes": "Replace missed direct harness workflow references in state comments and help."
+    },
+    {
+      "id": "F-003",
+      "title": "Consolidate harness: single state file, CLI docs, maintenance",
+      "status": "done",
+      "notes": "agents.json holds all state; docs cmd = generated map + rules; maintenance sweep; AGENTS.md caveman"
+    }
+  ],
+  "progress": [
+    {
+      "date": "2026-06-10 22:56 UTC",
+      "title": "project setup",
+      "done": "setup complete: 3 command(s) registered, 1 feature(s) seeded",
+      "verified": "pass (2026-06-10 22:56 UTC @ 15e1832)",
+      "blockers": "none",
+      "feature": "F-000"
+    },
+    {
+      "date": "2026-06-10 22:56 UTC",
+      "title": "root wrapper",
+      "done": "agents.sh forwards to harness; docs prefer wrapper; setup complete.",
+      "verified": "pass (2026-06-10 22:56 UTC @ 15e1832)",
+      "blockers": "none",
+      "feature": "F-001",
+      "commit": "15e1832 (+ uncommitted changes)"
+    },
+    {
+      "date": "2026-06-10 23:05 UTC",
+      "title": "agents.sh audit",
+      "done": "Full hidden-file audit; no direct agents.py workflow commands remain; help usage now ./agents.sh.",
+      "verified": "pass (2026-06-10 23:05 UTC @ 2688a51)",
+      "blockers": "none",
+      "feature": "F-002",
+      "commit": "2688a51 (+ uncommitted changes)"
+    },
+    {
+      "date": "2026-06-11 08:25 UTC",
+      "title": "harness consolidation",
+      "done": "State merged into .agents/agents.json (scratch: agents.scratch.json, gitignored). Removed .agents/state/, .agents/docs/ (incl. reference), bootstrap-project + session-handoff skills. New: docs cmd (generated repo map + rules R-001..R-010), maintenance cmd. AGENTS.md rewritten caveman, token-efficiency embedded.",
+      "verified": "pass (2026-06-11 08:25 UTC @ 5091f9d)",
+      "next": "none planned",
+      "blockers": "none",
+      "feature": "F-003",
+      "commit": "5091f9d (+ uncommitted changes)"
+    }
+  ],
+  "rules": [
+    {
+      "id": "R-001",
+      "category": "architecture",
+      "text": "agents.sh = sole public entrypoint; finds python3/python >=3.8, execs .agents/agents.py (stdlib-only)",
+      "added": "2026-06-11"
+    },
+    {
+      "id": "R-002",
+      "category": "architecture",
+      "text": "All durable state in .agents/agents.json behind the CLI; scratch (last verify) in .agents/agents.scratch.json, gitignored",
+      "added": "2026-06-11"
+    },
+    {
+      "id": "R-003",
+      "category": "architecture",
+      "text": "One manual: AGENTS.md. CLAUDE.md/GEMINI.md symlink to it; .github/copilot-instructions.md mirrors it; .claude/skills -> .agents/skills",
+      "added": "2026-06-11"
+    },
+    {
+      "id": "R-004",
+      "category": "architecture",
+      "text": "CI (.github/workflows/agents.yml) runs ./agents.sh ci: check, then init + verify once setup complete",
+      "added": "2026-06-11"
+    },
+    {
+      "id": "R-005",
+      "category": "conventions",
+      "text": "Shell: POSIX sh, set -eu, portable. Python: stdlib-only 3.8+, no import-time side effects",
+      "added": "2026-06-11"
+    },
+    {
+      "id": "R-006",
+      "category": "conventions",
+      "text": "Project commands are data (./agents.sh cmd set), never edits to agents.py",
+      "added": "2026-06-11"
+    },
+    {
+      "id": "R-007",
+      "category": "conventions",
+      "text": "Commits: one change each, imperative subject <=72 chars, prefixes feat:/fix:/docs:/chore:",
+      "added": "2026-06-11"
+    },
+    {
+      "id": "R-008",
+      "category": "conventions",
+      "text": "CLI output ends with an actionable next: hint where possible",
+      "added": "2026-06-11"
+    },
+    {
+      "id": "R-009",
+      "category": "testing",
+      "text": "Done = ./agents.sh verify green (registered --verify commands, cheap/fast first)",
+      "added": "2026-06-11"
+    },
+    {
+      "id": "R-010",
+      "category": "testing",
+      "text": "Template gates: sh -n agents.sh, py_compile agents.py, ./agents.sh check. Projects register real lint/test/build at setup",
+      "added": "2026-06-11"
+    }
+  ]
 }
