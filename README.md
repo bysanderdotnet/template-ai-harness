@@ -60,9 +60,9 @@ tells the agent what to do next at every step.
 | `handoff` | End-of-session checklist with live status: verify fresh? progress logged? feature closed? committed? pushed? |
 | `docs` | Live project docs: a repo map generated from `git ls-files` (never drifts) + curated rules for architecture, conventions, and testing |
 | `maintenance` | Upkeep sweep: re-runs the setup checks (project identity, verify commands), flags rule categories to combine/prune, stale rules, blocked features, skills and commands to re-check |
-| `skill new/list` | Scaffold a new skill playbook in `.agents/skills/<name>/` / list discovered skills |
-| `cmd set/rm/list`, `run` | Command registry: agents register build/test/lint/dev commands instead of editing harness scripts |
-| `feature list/add/start/done/block/note` | Scope tracking; enforces one feature in progress |
+| `skill new/list/lint` | Scaffold a new skill playbook in `.agents/skills/<name>/` / list discovered skills / lint them against the quality bar |
+| `cmd set/rm/list/move`, `run` | Command registry: agents register build/test/lint/dev commands instead of editing harness scripts |
+| `feature list/add/start/done/block/note/edit` | Scope tracking; enforces one feature in progress |
 | `log`, `progress` | Session log: entries auto-stamped with date, commit, and last verify result |
 | `check`, `ci` | Structure validation / the single call CI makes |
 

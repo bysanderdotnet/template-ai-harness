@@ -9,13 +9,13 @@ Subcommands (details + examples: ./AGENTS.sh help <command>):
                  guided setup until complete (hook/CI run this)
     verify       run registered definition of done; records result
     handoff      end-of-session checklist, live status
-    feature      scope: list / add / start / done / block / note
+    feature      scope: list / add / start / done / block / note / edit
     log          record progress entry (auto-stamps date, commit, verify result)
     progress     show recent progress entries (display bounded, never compact by hand)
     docs         live project docs: generated repo map + curated rules
-    skill        scaffold a new skill playbook / list discovered skills
+    skill        scaffold a new skill playbook / list discovered skills / lint them
     maintenance  health sweep: update, combine, prune, re-check
-    cmd          register project commands: set / rm / list
+    cmd          register project commands: set / rm / list / move
     run          run one registered command by name
     check        structure/state validation only
     ci           what CI runs: check, then init + verify once setup complete
@@ -702,7 +702,7 @@ def cmd_init(args):
 def run_verify_steps(steps, keep_going=False):
     """Run verify-flagged commands in order; record + return overall result."""
     failures, timings = [], []
-    for name, c in steps:
+    for i, (name, c) in enumerate(steps):
         print(f"-- {name}: {c['run']} --")
         t0 = time.monotonic()
         rc = subprocess.run(c["run"], shell=True, cwd=ROOT).returncode
@@ -711,8 +711,10 @@ def run_verify_steps(steps, keep_going=False):
         if rc != 0:
             failures.append(f"{name} (exit {rc})")
             if not keep_going:
-                print(f"FAIL: step '{name}' exited {rc}; remaining steps skipped "
-                      "(run them all anyway: verify --keep-going).")
+                left = len(steps) - i - 1
+                print(f"FAIL: step '{name}' exited {rc}"
+                      + (f"; {left} remaining step(s) skipped "
+                         "(run them all anyway: verify --keep-going)." if left else "."))
                 break
             print(f"FAIL: step '{name}' exited {rc}; continuing (--keep-going).")
     record_verify("fail" if failures else "pass",
@@ -851,8 +853,8 @@ def cmd_log(args):
     title = (args.title or "").strip()
     if not title:
         die("log needs a non-empty title")
-    if args.done is None:
-        die('log needs --done "..." (what shipped)')
+    if args.done is None or not args.done.strip():
+        die('log needs a non-empty --done "..." (what shipped)')
     entry = {
         "date": now_utc(),
         "title": title,
