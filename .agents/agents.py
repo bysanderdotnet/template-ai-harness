@@ -29,8 +29,10 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 
 SCRIPT = "./AGENTS.sh"
@@ -596,15 +598,36 @@ def cmd_verify(_args):
 
 
 def tree_state():
-    """Content hash of the tracked working tree, commit-independent and
-    excluding .agents/ (harness state: log/feature updates after a verify run
-    must not mark it stale). A verify stays fresh when the exact tree it
-    checked is committed afterwards."""
-    stash = git("stash", "create")  # tree of HEAD + uncommitted tracked changes
-    out = git("ls-tree", (stash or "HEAD") + "^{tree}")
-    if not out:
+    """Content hash of the working tree — tracked AND untracked non-ignored
+    files — commit-independent and excluding .agents/ (harness state:
+    log/feature updates after a verify run must not mark it stale). Built
+    through a throwaway index, not `git stash create`: stash misses untracked
+    files, so a verify would stay "fresh" after new code appeared, and go
+    stale after committing files that were untracked when it ran. With the
+    full snapshot a verify stays fresh exactly while the content it checked
+    is unchanged, including across the commit."""
+    real_index = git("rev-parse", "--git-path", "index")
+    if not real_index:
         return None
-    lines = [l for l in out.splitlines() if not l.endswith("\t.agents")]
+    if not os.path.isabs(real_index):
+        real_index = os.path.join(ROOT, real_index)
+    tmp_dir = tempfile.mkdtemp(prefix="agents-tree-")
+    tmp_index = os.path.join(tmp_dir, "index")
+    try:
+        if os.path.isfile(real_index):
+            shutil.copy(real_index, tmp_index)  # keep stat cache: add -A stays fast
+        env = dict(os.environ, GIT_INDEX_FILE=tmp_index)
+        subprocess.run(["git", "add", "-A", "."],
+                       capture_output=True, cwd=ROOT, env=env)
+        out = subprocess.run(["git", "write-tree"],
+                             capture_output=True, text=True, cwd=ROOT, env=env)
+        tree = out.stdout.strip() if out.returncode == 0 else ""
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    if not tree:
+        return None
+    lines = [l for l in git("ls-tree", tree).splitlines()
+             if not l.endswith("\t.agents")]
     return hashlib.sha1("\n".join(lines).encode("utf-8")).hexdigest()
 
 
@@ -1141,7 +1164,9 @@ Every command prints a `next:` hint — follow it. State lives in
 .agents/agents.json, owned by this script: manage through these
 subcommands, never hand-edit. Details per command: {SCRIPT} help <command>.""",
     )
-    sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
+    # dest must not be "command": the `cmd` subparser has a positional named
+    # command (the shell command), which would clobber it in the namespace.
+    sub = p.add_subparsers(dest="subcommand", required=True, metavar="<command>")
 
     def add(name, fn, help_, epilog=None):
         sp = sub.add_parser(name, help=help_, description=help_, epilog=epilog,
