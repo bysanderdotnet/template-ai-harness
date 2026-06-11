@@ -29,8 +29,9 @@ Skills = stored playbooks in `.agents/skills/<name>/SKILL.md`; `init` lists them
 
 - Task matches a skill → follow playbook, don't improvise.
 - Just did recurring multi-step task (deploy, release, migration, codegen)?
-  Capture as skill NOW, unprompted — how-to: `.agents/skills/new-skill/SKILL.md`.
-  Next session replays it, no re-deriving.
+  Capture as skill NOW, unprompted — scaffold: `./AGENTS.sh skill new <name>`;
+  how-to: `.agents/skills/new-skill/SKILL.md`. Next session replays it,
+  no re-deriving.
 
 ## Style: caveman
 

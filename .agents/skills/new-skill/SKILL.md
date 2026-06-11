@@ -38,8 +38,8 @@ Constraints, failure modes, what NOT to do.
 
 ## Steps
 
-1. `mkdir -p .agents/skills/<name>`
-2. Write `SKILL.md` per format above.
+1. `./AGENTS.sh skill new <name>` — scaffolds `.agents/skills/<name>/SKILL.md`.
+2. Fill every TODO in the scaffold per format above.
 3. Helper scripts → same dir, reference by path.
 4. Mention the skill in AGENTS.md only if it gates the core workflow.
 5. Check discovery: `./AGENTS.sh init` — new skill must appear

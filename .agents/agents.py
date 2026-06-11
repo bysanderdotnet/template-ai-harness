@@ -13,6 +13,7 @@ Subcommands (details + examples: ./AGENTS.sh help <command>):
     log          record progress entry (auto-stamps date, commit, verify result)
     progress     show recent progress entries (display bounded, never compact by hand)
     docs         live project docs: generated repo map + curated rules
+    skill        scaffold a new skill playbook / list discovered skills
     maintenance  health sweep: update, combine, prune, re-check
     cmd          register project commands: set / rm / list
     run          run one registered command by name
@@ -29,6 +30,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -175,6 +177,35 @@ def fmt_feature(f):
 
 # ---------- structure / state checks ----------
 
+SHELL_BUILTINS = {"cd", "export", "set", "source", ".", "exec", "eval",
+                  "if", "for", "while", "until", "case", "test", "["}
+
+
+def missing_command_exes(cmds):
+    """(name, exe) pairs whose executable doesn't resolve. Catches dead
+    absolute paths — e.g. a toolchain registered from /tmp in an ephemeral
+    session — before verify fails with a cryptic shell error."""
+    if os.name != "posix":
+        return []  # registered commands run through POSIX sh; skip elsewhere
+    missing = []
+    for name, c in cmds.items():
+        try:
+            tokens = shlex.split(c.get("run", ""))
+        except ValueError:
+            continue
+        exe = next((t for t in tokens if "=" not in t), None)  # skip FOO=1 prefixes
+        if not exe or exe in SHELL_BUILTINS:
+            continue
+        if os.path.sep in exe:
+            ok = os.path.exists(exe if os.path.isabs(exe)
+                                else os.path.join(ROOT, exe))
+        else:
+            ok = shutil.which(exe) is not None
+        if not ok:
+            missing.append((name, exe))
+    return missing
+
+
 def collect_problems():
     """Return (fails, warns) about harness structure and state."""
     fails, warns = [], []
@@ -200,10 +231,12 @@ def collect_problems():
             cfg = load_json(CONFIG_PATH)
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             fails.append(f".agents/agents.json is not valid JSON: {e}")
-    if isinstance(cfg, dict) and section_error(cfg):
-        fails.append(f".agents/agents.json invalid: {section_error(cfg)} — "
-                     "restore from git history, never hand-edit")
-        cfg = None
+    if isinstance(cfg, dict):
+        err = section_error(cfg)
+        if err:
+            fails.append(f".agents/agents.json invalid: {err} — "
+                         "restore from git history, never hand-edit")
+            cfg = None
     if isinstance(cfg, dict):
         wip = [f for f in cfg.get("features", []) if f.get("status") == "in_progress"]
         if len(wip) > 1:
@@ -214,6 +247,9 @@ def collect_problems():
             if n > RULES_SOFT_CAP:
                 warns.append(f"{n} {cat} rules (soft cap {RULES_SOFT_CAP}) — "
                              f"combine/prune: {SCRIPT} maintenance")
+        for name, exe in missing_command_exes(cfg.get("commands") or {}):
+            warns.append(f"command '{name}': executable '{exe}' not found — "
+                         f"install the toolchain or re-register: {SCRIPT} cmd set {name} \"...\"")
 
     if os.path.isdir(SKILLS_DIR):
         for name in sorted(os.listdir(SKILLS_DIR)):
@@ -225,6 +261,9 @@ def collect_problems():
                 warns.append(f".agents/skills/{name}/ has no SKILL.md")
             elif not skill_description(md):
                 warns.append(f".agents/skills/{name}/SKILL.md missing 'description:' frontmatter")
+            elif skill_description(md).startswith("TODO"):
+                warns.append(f".agents/skills/{name}/SKILL.md description still the "
+                             "scaffold TODO — fill it in")
 
     if not git("rev-parse", "--is-inside-work-tree"):
         warns.append("not a git checkout — repo map, verify staleness tracking, "
@@ -273,7 +312,8 @@ def _check_project():
             text = fh.read()
     except OSError:
         return False, "AGENTS.md unreadable"
-    m = re.search(r"^## Project\n(.*?)(?=^## |\Z)", text, re.M | re.S)
+    # \r?\n: CRLF checkouts (e.g. Windows autocrlf) must not fail the check
+    m = re.search(r"^## Project[ \t]*\r?\n(.*?)(?=^## |\Z)", text, re.M | re.S)
     if not m:
         return False, "AGENTS.md has no '## Project' section"
     section = m.group(1)
@@ -755,6 +795,11 @@ def cmd_progress(args):
     if not entries:
         print(f"No progress entries yet. Record work with: {SCRIPT} log")
         return
+    if args.feature:
+        entries = [e for e in entries if e.get("feature") == args.feature]
+        if not entries:
+            print(f"No entries for feature '{args.feature}'.")
+            return
     n = len(entries) if args.all else max(1, args.n)
     shown = entries[-n:]
     for e in reversed(shown):  # newest first
@@ -793,12 +838,19 @@ def cmd_handoff(_args):
     entries = cfg["progress"]
     today = now_utc()[:10]
     latest = entries[-1] if entries else None
-    if latest and latest.get("date", "").startswith(today):
-        item(True, "log", f"entry recorded today: \"{latest.get('title')}\"")
-    else:
+    latest_date = latest.get("date", "") if latest else ""
+    if not latest_date.startswith(today):
         item(False, "log", f"no entry for this session — run: {SCRIPT} log \"<title>\" "
                            "--done \"...\" --next \"...\" (caveman style; cover shipped, "
                            "known issues, next step, blockers)")
+    elif lv and lv.get("result") == "pass" and (lv.get("date") or "") > latest_date:
+        # dates share one fixed-width format, so string compare is chronological;
+        # a same-day entry from an earlier session must not pass for this one
+        item(False, "log", f"latest entry (\"{latest.get('title')}\") predates the last "
+                           f"verify pass — log this session's work: {SCRIPT} log \"<title>\" "
+                           "--done \"...\"")
+    else:
+        item(True, "log", f"entry recorded today: \"{latest.get('title')}\"")
 
     wip = [f for f in cfg["features"] if f.get("status") == "in_progress"]
     if wip:
@@ -824,7 +876,7 @@ def cmd_handoff(_args):
 
     print("also consider:")
     print(f"  - learned a durable fact → {SCRIPT} docs add <category> \"<rule>\"")
-    print("  - repeated a multi-step procedure → capture a skill (.agents/skills/new-skill/SKILL.md)")
+    print(f"  - repeated a multi-step procedure → capture a skill: {SCRIPT} skill new <name>")
     print(f"  - build/test commands changed → {SCRIPT} cmd set ...; CI needs toolchain "
           "changes → tell user (CI human-owned, never edit)")
     if todo:
@@ -872,9 +924,9 @@ def cmd_feature(args):
         if fid is None:
             nums = [int(m.group(1)) for f in feats
                     for m in [re.match(r"F-(\d+)$", f.get("id", ""))] if m]
-            fid = f"F-{(max(nums) + 1 if nums else 1):03d}"
+            fid = f"F-{(max(nums) + 1 if nums else 1):05d}"
         elif not re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]*$", fid):
-            die("feature id must be letters/digits/dashes/underscores, e.g. F-001")
+            die("feature id must be letters/digits/dashes/underscores, e.g. F-00001")
         if find_feature(feats, fid):
             die(f"feature id '{fid}' already exists")
         f = {"id": fid, "title": title, "status": "todo"}
@@ -888,7 +940,7 @@ def cmd_feature(args):
 
     # remaining actions operate on an existing id
     if not args.title:
-        die(f"feature {args.action} needs an id, e.g.: feature {args.action} F-001")
+        die(f"feature {args.action} needs an id, e.g.: feature {args.action} F-00001")
     f = find_feature(feats, args.title)
     if f is None:
         die(f"no feature with id '{args.title}' (see: feature list --all)")
@@ -900,6 +952,10 @@ def cmd_feature(args):
                 f"Finish (feature done {wip[0].get('id')}) or block it first.")
         if f.get("status") == "done":
             print(f"WARN: {f['id']} was done — reopening.")
+        elif f.get("status") == "blocked":
+            print(f"WARN: {f['id']} was blocked ({f.get('notes') or 'no reason recorded'}) — "
+                  f"confirm resolved; note is stale: {SCRIPT} feature note {f['id']} "
+                  "--notes \"...\" or --clear")
         f["status"] = "in_progress"
     elif args.action == "done":
         if f.get("status") != "in_progress":
@@ -912,9 +968,14 @@ def cmd_feature(args):
         elif not f.get("notes"):
             print("WARN: blocked without a reason — pass --notes \"why\".")
     elif args.action == "note":
-        if not args.notes:
-            die("feature note needs --notes \"text\"")
-        f["notes"] = args.notes
+        if args.clear and args.notes:
+            die("feature note: pass --notes or --clear, not both")
+        if args.clear:
+            f.pop("notes", None)
+        elif args.notes:
+            f["notes"] = args.notes
+        else:
+            die("feature note needs --notes \"text\" or --clear")
     save_config(cfg)
     print(f"{f['id']} -> {f['status']}" + (f" ({f['notes']})" if f.get("notes") else ""))
     if args.action == "start":
@@ -1030,6 +1091,56 @@ def cmd_docs(args):
     tip(f"learned a durable fact → {SCRIPT} docs add <category> \"<rule>\" (terse, one fact per rule)")
 
 
+# ---------- skill ----------
+
+SKILL_TEMPLATE = """\
+---
+name: {name}
+description: TODO what it does + when to use. Third person, specific trigger words — the only part loaded by default, make it self-explanatory.
+---
+
+# {title}
+
+One line: goal of the playbook.
+
+## Steps
+
+1. TODO — numbered, concrete, commands copy-pasteable from repo root. Cheap checks first.
+
+## Rules / gotchas
+
+- TODO — constraints, failure modes, what NOT to do.
+"""
+
+
+def cmd_skill(args):
+    if args.action == "list":
+        rows = list_skills()
+        if not rows:
+            print(f"No skills yet. Scaffold one: {SCRIPT} skill new <name>")
+            return
+        for name, desc in rows:
+            print(f"  {name}: {desc}")
+        return
+
+    # new
+    if not args.name:
+        die("skill new needs a name, e.g.: skill new release-deploy")
+    if not re.match(r"^[a-z0-9][a-z0-9-]*$", args.name):
+        die("skill name must be kebab-case: lowercase letters/digits/dashes")
+    md = os.path.join(SKILLS_DIR, args.name, "SKILL.md")
+    if os.path.exists(md):
+        die(f".agents/skills/{args.name}/SKILL.md already exists")
+    os.makedirs(os.path.dirname(md), exist_ok=True)
+    title = args.name.replace("-", " ").capitalize()
+    with open(md, "w", encoding="utf-8") as fh:
+        fh.write(SKILL_TEMPLATE.format(name=args.name, title=title))
+    print(f"Scaffolded .agents/skills/{args.name}/SKILL.md")
+    print("Fill every TODO. Quality bar (.agents/skills/new-skill/SKILL.md): body <=~80 "
+          "lines, caveman style, executable by a fresh agent with zero context.")
+    tip(f"fill it in, then check discovery: {SCRIPT} init")
+
+
 # ---------- maintenance ----------
 
 def cmd_maintenance(_args):
@@ -1055,6 +1166,10 @@ def cmd_maintenance(_args):
         item(False, "structure", w)
     if not fails and not warns:
         item(True, "structure", "no FAILs or WARNs")
+
+    print("-- project identity (setup checks re-run; catches later drift) --")
+    ok, detail = _check_project()
+    item(ok, "project", detail)
 
     print("-- rules (project docs) --")
     rules = cfg["rules"]
@@ -1105,6 +1220,8 @@ def cmd_maintenance(_args):
         item(True, "skills", "none to review")
 
     print("-- commands / CI --")
+    ok, detail = _check_commands()
+    item(ok, "verify commands", detail)
     wf = os.path.join(ROOT, ".github", "workflows", "agents.yml")
     try:
         with open(wf, encoding="utf-8") as fh:
@@ -1163,22 +1280,36 @@ def cmd_cmd(args):
         die("command name must be lowercase letters/digits/dashes/underscores")
     if not args.command:
         die('cmd set needs the shell command: cmd set <name> "<shell command>"')
+    if args.verify and args.no_verify:
+        die("cmd set: pass --verify or --no-verify, not both")
+    if args.init and args.no_init:
+        die("cmd set: pass --init or --no-init, not both")
     entry = {"run": args.command}
     old = cmds.get(args.name, {})
-    for key in ("verify", "init", "desc"):  # updates keep flags/desc — clear via cmd rm
+    for key in ("verify", "init", "desc"):  # updates keep flags/desc — clear via --no-*/--desc ""
         if old.get(key):
             entry[key] = old[key]
     if args.verify:
         entry["verify"] = True
+    if args.no_verify:
+        entry.pop("verify", None)
     if args.init:
         entry["init"] = True
-    if args.desc:
-        entry["desc"] = args.desc
+    if args.no_init:
+        entry.pop("init", None)
+    if args.desc is not None:
+        if args.desc:
+            entry["desc"] = args.desc
+        else:
+            entry.pop("desc", None)
     existed = args.name in cmds
     cmds[args.name] = entry  # keeps position if existing, appends if new
     save_config(cfg)
     flags = "".join(f" [{f}]" for f in ("verify", "init") if entry.get(f))
     print(f"{'Updated' if existed else 'Registered'} {args.name}: {args.command}{flags}")
+    for _n, exe in missing_command_exes({args.name: entry}):
+        print(f"WARN: executable '{exe}' not found from repo root — "
+              "command may not run; check path/toolchain.")
 
 
 def cmd_run(args):
@@ -1247,7 +1378,7 @@ setup completes, init reports state and the next action.""")
              epilog=f"""\
 example:
   {SCRIPT} log "auth feature" --done "JWT login in src/auth/" \\
-      --issues "refresh tokens untested" --next "wire logout" --feature F-002
+      --issues "refresh tokens untested" --next "wire logout" --feature F-00002
 Terse caveman style (AGENTS.md '## Style'). Storage/history handled for you;
 nothing to compact or archive.""")
     lg.add_argument("title", help="short entry title")
@@ -1255,13 +1386,14 @@ nothing to compact or archive.""")
     lg.add_argument("--issues", help="broken/known issues: facts, exact errors")
     lg.add_argument("--next", help="single most useful next step")
     lg.add_argument("--blockers", help="what stops progress (default: none)")
-    lg.add_argument("--feature", help="related feature id, e.g. F-001")
+    lg.add_argument("--feature", help="related feature id, e.g. F-00001")
     lg.add_argument("--verified", help="override the auto-detected verify status")
 
     pr = add("progress", cmd_progress, "show recent progress entries, newest first")
     pr.add_argument("-n", type=int, default=PROGRESS_DEFAULT_SHOWN,
                     help="how many entries (default %(default)s)")
     pr.add_argument("--all", action="store_true", help="show every entry")
+    pr.add_argument("--feature", help="only entries logged for this feature id, e.g. F-00001")
 
     ft = add("feature", cmd_feature,
              "manage scope; one feature in_progress at a time (enforced)",
@@ -1269,14 +1401,16 @@ nothing to compact or archive.""")
 examples:
   {SCRIPT} feature list
   {SCRIPT} feature add "rate limiting" --notes "per-IP, 100 req/min"
-  {SCRIPT} feature start F-003
-  {SCRIPT} feature done F-003
-  {SCRIPT} feature block F-004 --notes "waiting on API key"
+  {SCRIPT} feature start F-00003
+  {SCRIPT} feature done F-00003
+  {SCRIPT} feature block F-00004 --notes "waiting on API key"
+  {SCRIPT} feature note F-00004 --clear
 """)
     ft.add_argument("action", choices=["list", "add", "start", "done", "block", "note"])
     ft.add_argument("title", nargs="?", help="title (for add) or feature id (for the rest)")
-    ft.add_argument("--id", help="explicit id for add (default: next F-NNN)")
+    ft.add_argument("--id", help="explicit id for add (default: next F-NNNNN)")
     ft.add_argument("--notes", help="notes text (add/block/note)")
+    ft.add_argument("--clear", action="store_true", help="note: remove the feature's note")
     ft.add_argument("--all", action="store_true", help="list: include done features")
 
     dc = add("docs", cmd_docs,
@@ -1296,6 +1430,16 @@ part: one terse fact each, added when learned, pruned when stale
                          % " | ".join(RULE_CATEGORIES))
     dc.add_argument("text", nargs="?", help="rule text (for add)")
 
+    sk = add("skill", cmd_skill,
+             "scaffold a new skill playbook (.agents/skills/<name>/SKILL.md) or list skills",
+             epilog=f"""\
+examples:
+  {SCRIPT} skill new release-deploy     scaffold, then fill every TODO
+  {SCRIPT} skill list
+Quality bar + format details: .agents/skills/new-skill/SKILL.md.""")
+    sk.add_argument("action", choices=["new", "list"])
+    sk.add_argument("name", nargs="?", help="kebab-case skill name (for new)")
+
     add("maintenance", cmd_maintenance,
         "health sweep for an upkeep session: flags rules to combine/prune, blocked "
         "features, skills and commands to re-check, docs to refresh")
@@ -1309,15 +1453,20 @@ examples:
   {SCRIPT} cmd set dev "npm run dev"                on-demand helper (use: run dev)
   {SCRIPT} cmd rm lint
 verify steps run in listed order — register cheap/fast checks first.
-re-running set on an existing name keeps its flags/desc; clear with cmd rm.""")
+re-running set on an existing name keeps its flags/desc and its position in
+the order; clear flags with --no-verify / --no-init, the desc with --desc "".""")
     cm.add_argument("action", choices=["set", "rm", "list"])
     cm.add_argument("name", nargs="?", help="command name, e.g. test")
     cm.add_argument("command", nargs="?", help="shell command, e.g. \"npm test\"")
     cm.add_argument("--verify", action="store_true",
                     help="part of the definition of done (run by `verify`)")
+    cm.add_argument("--no-verify", action="store_true",
+                    help="remove the verify flag from an existing command")
     cm.add_argument("--init", action="store_true",
                     help="session-start smoke check (run by `init`)")
-    cm.add_argument("--desc", help="one-line description")
+    cm.add_argument("--no-init", action="store_true",
+                    help="remove the init flag from an existing command")
+    cm.add_argument("--desc", help="one-line description (\"\" clears it)")
 
     rn = add("run", cmd_run, "run a registered command by name")
     rn.add_argument("name")
