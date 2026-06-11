@@ -29,8 +29,10 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 
 SCRIPT = "./AGENTS.sh"
@@ -94,6 +96,24 @@ def tip(msg):
 
 # ---------- state (single file: agents.json; scratch: agents.scratch.json) ----------
 
+def section_error(cfg):
+    """Wrong-typed sections (hand-edit damage); None when the shape is sane."""
+    for key, typ in (("setup", dict), ("commands", dict), ("features", list),
+                     ("progress", list), ("rules", list)):
+        if key in cfg and not isinstance(cfg[key], typ):
+            kind = "object" if typ is dict else "array"
+            return f"'{key}' must be a JSON {kind}"
+    for key in ("features", "progress", "rules"):
+        if any(not isinstance(x, dict) for x in cfg.get(key, []) or []):
+            return f"'{key}' entries must be JSON objects"
+    if any(not isinstance(v, dict) for v in (cfg.get("commands") or {}).values()):
+        return "'commands' entries must be JSON objects"
+    setup = cfg.get("setup")
+    if isinstance(setup, dict) and "done" in setup and not isinstance(setup["done"], list):
+        return "'setup.done' must be a JSON array"
+    return None
+
+
 def load_config():
     """All durable harness state. Top-level keys are independent sections so
     future harness versions can add more without migrations."""
@@ -107,6 +127,10 @@ def load_config():
             "Restore from git history — never hand-edit.")
     if not isinstance(cfg, dict):
         die(".agents/agents.json is not a JSON object. "
+            "Restore from git history — never hand-edit.")
+    err = section_error(cfg)
+    if err:
+        die(f".agents/agents.json invalid: {err}. "
             "Restore from git history — never hand-edit.")
     for key, default in (("commands", {}), ("features", []),
                          ("progress", []), ("rules", [])):
@@ -176,6 +200,10 @@ def collect_problems():
             cfg = load_json(CONFIG_PATH)
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             fails.append(f".agents/agents.json is not valid JSON: {e}")
+    if isinstance(cfg, dict) and section_error(cfg):
+        fails.append(f".agents/agents.json invalid: {section_error(cfg)} — "
+                     "restore from git history, never hand-edit")
+        cfg = None
     if isinstance(cfg, dict):
         wip = [f for f in cfg.get("features", []) if f.get("status") == "in_progress"]
         if len(wip) > 1:
@@ -197,6 +225,10 @@ def collect_problems():
                 warns.append(f".agents/skills/{name}/ has no SKILL.md")
             elif not skill_description(md):
                 warns.append(f".agents/skills/{name}/SKILL.md missing 'description:' frontmatter")
+
+    if not git("rev-parse", "--is-inside-work-tree"):
+        warns.append("not a git checkout — repo map, verify staleness tracking, "
+                     "and the setup marker scan are degraded")
     return fails, warns
 
 
@@ -251,7 +283,17 @@ def _check_project():
              if not re.search(rf"^- {field}:[ \t]*\S", section, re.M)]
     if empty:
         return False, "AGENTS.md '## Project' fields empty: " + ", ".join(empty)
-    return True, "AGENTS.md project section filled"
+    readme = os.path.join(ROOT, "README.md")
+    if not os.path.isfile(readme):
+        return False, "README.md missing — write one for the actual project"
+    try:
+        with open(readme, encoding="utf-8") as fh:
+            rtext = fh.read()
+    except OSError:
+        return False, "README.md unreadable"
+    if "Template repository for setting up projects with an AI harness" in rtext:
+        return False, "README.md still template text — rewrite for the actual project"
+    return True, "AGENTS.md project section filled, README.md rewritten"
 
 
 def _check_commands():
@@ -596,15 +638,36 @@ def cmd_verify(_args):
 
 
 def tree_state():
-    """Content hash of the tracked working tree, commit-independent and
-    excluding .agents/ (harness state: log/feature updates after a verify run
-    must not mark it stale). A verify stays fresh when the exact tree it
-    checked is committed afterwards."""
-    stash = git("stash", "create")  # tree of HEAD + uncommitted tracked changes
-    out = git("ls-tree", (stash or "HEAD") + "^{tree}")
-    if not out:
+    """Content hash of the working tree — tracked AND untracked non-ignored
+    files — commit-independent and excluding .agents/ (harness state:
+    log/feature updates after a verify run must not mark it stale). Built
+    through a throwaway index, not `git stash create`: stash misses untracked
+    files, so a verify would stay "fresh" after new code appeared, and go
+    stale after committing files that were untracked when it ran. With the
+    full snapshot a verify stays fresh exactly while the content it checked
+    is unchanged, including across the commit."""
+    real_index = git("rev-parse", "--git-path", "index")
+    if not real_index:
         return None
-    lines = [l for l in out.splitlines() if not l.endswith("\t.agents")]
+    if not os.path.isabs(real_index):
+        real_index = os.path.join(ROOT, real_index)
+    tmp_dir = tempfile.mkdtemp(prefix="agents-tree-")
+    tmp_index = os.path.join(tmp_dir, "index")
+    try:
+        if os.path.isfile(real_index):
+            shutil.copy(real_index, tmp_index)  # keep stat cache: add -A stays fast
+        env = dict(os.environ, GIT_INDEX_FILE=tmp_index)
+        subprocess.run(["git", "add", "-A", "."],
+                       capture_output=True, cwd=ROOT, env=env)
+        out = subprocess.run(["git", "write-tree"],
+                             capture_output=True, text=True, cwd=ROOT, env=env)
+        tree = out.stdout.strip() if out.returncode == 0 else ""
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    if not tree:
+        return None
+    lines = [l for l in git("ls-tree", tree).splitlines()
+             if not l.endswith("\t.agents")]
     return hashlib.sha1("\n".join(lines).encode("utf-8")).hexdigest()
 
 
@@ -657,9 +720,12 @@ def verified_note():
 
 def cmd_log(args):
     cfg = load_config()
+    title = args.title.strip()
+    if not title:
+        die("log needs a non-empty title")
     entry = {
         "date": now_utc(),
-        "title": args.title,
+        "title": title,
         "done": args.done,
         "verified": args.verified or verified_note(),
     }
@@ -799,7 +865,8 @@ def cmd_feature(args):
         return
 
     if args.action == "add":
-        if not args.title:
+        title = (args.title or "").strip()
+        if not title:
             die("feature add needs a title: feature add \"<title>\"")
         fid = args.id
         if fid is None:
@@ -810,7 +877,7 @@ def cmd_feature(args):
             die("feature id must be letters/digits/dashes/underscores, e.g. F-001")
         if find_feature(feats, fid):
             die(f"feature id '{fid}' already exists")
-        f = {"id": fid, "title": args.title, "status": "todo"}
+        f = {"id": fid, "title": title, "status": "todo"}
         if args.notes:
             f["notes"] = args.notes
         feats.append(f)
@@ -831,6 +898,8 @@ def cmd_feature(args):
         if wip:
             die(f"{wip[0].get('id')} already in_progress (policy: max 1). "
                 f"Finish (feature done {wip[0].get('id')}) or block it first.")
+        if f.get("status") == "done":
+            print(f"WARN: {f['id']} was done — reopening.")
         f["status"] = "in_progress"
     elif args.action == "done":
         if f.get("status") != "in_progress":
@@ -912,16 +981,17 @@ def cmd_docs(args):
     if args.action == "add":
         if args.target not in RULE_CATEGORIES:
             die(f"docs add needs a category: {' | '.join(RULE_CATEGORIES)}")
-        if not args.text:
+        text = (args.text or "").strip()
+        if not text:
             die('docs add needs the rule text: docs add <category> "<rule>"')
-        if len(args.text) > 160:
+        if len(text) > 160:
             print("WARN: long rule — caveman style, split or trim.")
         nums = [int(m.group(1)) for r in rules
                 for m in [re.match(r"R-(\d+)$", r.get("id", ""))] if m]
         rule = {
             "id": f"R-{(max(nums) + 1 if nums else 1):03d}",
             "category": args.target,
-            "text": args.text,
+            "text": text,
             "added": now_utc()[:10],
         }
         rules.append(rule)
@@ -1141,7 +1211,9 @@ Every command prints a `next:` hint — follow it. State lives in
 .agents/agents.json, owned by this script: manage through these
 subcommands, never hand-edit. Details per command: {SCRIPT} help <command>.""",
     )
-    sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
+    # dest must not be "command": the `cmd` subparser has a positional named
+    # command (the shell command), which would clobber it in the namespace.
+    sub = p.add_subparsers(dest="subcommand", required=True, metavar="<command>")
 
     def add(name, fn, help_, epilog=None):
         sp = sub.add_parser(name, help=help_, description=help_, epilog=epilog,
@@ -1260,6 +1332,10 @@ re-running set on an existing name keeps its flags/desc; clear with cmd rm.""")
 
 
 def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    if not argv:
+        argv = ["help"]  # bare invocation: show the guide, not a usage error
     args = build_parser().parse_args(argv)
     try:
         args.fn(args)
