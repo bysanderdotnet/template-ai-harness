@@ -14,7 +14,7 @@ cleanly between sessions.
 Use the root wrapper for all harness operations:
 
 ```sh
-./AGENTS.sh --help
+./AGENTS.sh help
 ./AGENTS.sh init
 ./AGENTS.sh verify
 ./AGENTS.sh handoff
@@ -40,7 +40,7 @@ GEMINI.md -> AGENTS.md     Gemini CLI entrypoint (symlink)
 └── skills -> .agents/skills   Skill auto-discovery for Claude Code
 .agents/
 ├── README.md              Map of harness internals + design principles
-├── agents.py              Harness CLI implementation; use ./AGENTS.sh --help
+├── agents.py              Harness CLI implementation; use ./AGENTS.sh help
 ├── agents.json            All durable state: commands, features, progress log, rules
 ├── agents.scratch.json    Transient scratch (gitignored; last verify result)
 └── skills/
@@ -67,8 +67,8 @@ tells the agent what to do next at every step.
 
 Agents never need to know where state lives or hand-edit JSON. Adding a test
 step to a project is `./AGENTS.sh cmd set test "npm test" --verify`, not a
-script rewrite. All subcommand documentation lives in `--help`, so the manual
-never drifts from the tool.
+script rewrite. All subcommand documentation lives in `./AGENTS.sh help`, so
+the manual never drifts from the tool.
 
 ## Project docs that don't rot
 
@@ -98,7 +98,7 @@ Based on harness-engineering research (OpenAI, Anthropic,
 [learn-harness-engineering](https://github.com/walkinglabs/learn-harness-engineering)).
 
 1. **Instructions** — `AGENTS.md` stays short; detail lives in
-   `./AGENTS.sh --help`, loaded on demand.
+   `./AGENTS.sh help`, loaded on demand.
 2. **State** — one JSON file behind the CLI, so sessions resume without cold
    start and agents can't corrupt state by hand-editing.
 3. **Verification** — done means `./AGENTS.sh verify` is green.

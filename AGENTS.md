@@ -1,13 +1,12 @@
 # Agent Operating Manual
 
-One tool runs the whole workflow and prints the next step at every turn:
+One tool runs the whole workflow, prints next step every turn:
 
-    ./AGENTS.sh init       # start here (auto-runs at session start); follow its output
-    ./AGENTS.sh --help     # stuck, or unsure which command fits the situation
+    ./AGENTS.sh init       # start here (auto-runs at session start); follow output
+    ./AGENTS.sh help       # stuck, or unsure which command fits
 
-Trust the script over memory: it walks first-run project setup, scope,
-verification, progress, and session handoff. All state lives in
-`.agents/agents.json`, owned by the CLI — never hand-edit it.
+Trust script over memory: walks setup, scope, verification, progress,
+handoff. All state in `.agents/agents.json`, CLI-owned — never hand-edit.
 
 ## Project
 
@@ -19,8 +18,8 @@ verification, progress, and session handoff. All state lives in
 ## Rules
 
 - One feature per session/commit. No drive-by refactors.
-- Done = `./AGENTS.sh verify` green. Anything else is "unverified" — say so.
-- `AGENTS.sh` / `.agents/agents.py` are harness internals. Usage = `--help`,
+- Done = `./AGENTS.sh verify` green. Anything else = "unverified" — say so.
+- `AGENTS.sh` / `.agents/agents.py` = harness internals. Usage = `help`,
   not reading or editing source.
 <!-- TODO(setup): add project no-go zones (e.g. "never edit /migrations"), then remove this comment -->
 
@@ -28,11 +27,10 @@ verification, progress, and session handoff. All state lives in
 
 Skills = stored playbooks in `.agents/skills/<name>/SKILL.md`; `init` lists them.
 
-- Task matches a skill → follow the playbook, don't improvise.
-- Just did a recurring multi-step task (deploy, release, migration, codegen)?
-  Capture it as a skill NOW, unprompted — how-to:
-  `.agents/skills/new-skill/SKILL.md`. Next session replays it instead of
-  re-deriving it.
+- Task matches a skill → follow playbook, don't improvise.
+- Just did recurring multi-step task (deploy, release, migration, codegen)?
+  Capture as skill NOW, unprompted — how-to: `.agents/skills/new-skill/SKILL.md`.
+  Next session replays it, no re-deriving.
 
 ## Style: caveman
 
