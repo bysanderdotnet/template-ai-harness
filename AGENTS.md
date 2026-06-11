@@ -11,9 +11,9 @@ lives behind it; never hand-edit its JSON files.
 
 ## Project
 
-- Name: template-ai-harness
-- Stack: POSIX shell wrapper plus stdlib-only Python 3 harness CLI, with GitHub Actions CI.
-- Purpose: Template repository for setting up projects with an AI harness that keeps agent sessions scoped, verified, logged, and resumable.
+- Name:
+- Stack: 
+- Purpose: 
 
 ## Session lifecycle
 
