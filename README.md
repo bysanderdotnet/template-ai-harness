@@ -1,3 +1,4 @@
+<!-- TODO(setup): rewrite this README for the actual project, then remove this comment -->
 # template-ai-harness
 
 Template repository for setting up projects with an AI harness. It ships a

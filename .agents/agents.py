@@ -124,6 +124,10 @@ def setting_enabled(on, off, current):
     return current
 
 
+SECTION_TYPES = (("setup", dict), ("commands", dict), ("features", list),
+                 ("progress", list), ("rules", list), ("settings", dict))
+
+
 def load_config():
     """All durable harness state. Top-level keys are independent sections so
     future harness versions can add more without migrations."""
@@ -138,6 +142,16 @@ def load_config():
     if not isinstance(cfg, dict):
         die(".agents/agents.json is not a JSON object. "
             "Restore from git history — never hand-edit.")
+    for key, typ in SECTION_TYPES:
+        if key in cfg and not isinstance(cfg[key], typ):
+            die(f".agents/agents.json: '{key}' must be a JSON "
+                f"{'object' if typ is dict else 'array'}. "
+                "Restore from git history — never hand-edit.")
+    for key in ("features", "progress", "rules"):
+        bad = [x for x in cfg.get(key, []) if not isinstance(x, dict)]
+        if bad:
+            die(f".agents/agents.json: '{key}' entries must be JSON objects. "
+                "Restore from git history — never hand-edit.")
     for key, default in (("commands", {}), ("features", []),
                          ("progress", []), ("rules", []),
                          ("settings", default_settings())):
@@ -216,12 +230,19 @@ def collect_problems():
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             fails.append(f".agents/agents.json is not valid JSON: {e}")
     if isinstance(cfg, dict):
-        wip = [f for f in cfg.get("features", []) if f.get("status") == "in_progress"]
+        for key, typ in SECTION_TYPES:
+            if key in cfg and not isinstance(cfg[key], typ):
+                fails.append(f".agents/agents.json: '{key}' must be a JSON "
+                             f"{'object' if typ is dict else 'array'}")
+        def section(key):  # tolerate wrong shapes; fails above already flag them
+            val = cfg.get(key, [])
+            return [x for x in val if isinstance(x, dict)] if isinstance(val, list) else []
+        wip = [f for f in section("features") if f.get("status") == "in_progress"]
         if len(wip) > 1:
             warns.append("%d features in_progress (policy: max 1): %s"
                          % (len(wip), ", ".join(f.get("id", "?") for f in wip)))
         for cat in RULE_CATEGORIES:
-            n = sum(1 for r in cfg.get("rules", []) if r.get("category") == cat)
+            n = sum(1 for r in section("rules") if r.get("category") == cat)
             if n > RULES_SOFT_CAP:
                 warns.append(f"{n} {cat} rules (soft cap {RULES_SOFT_CAP}) — "
                              f"combine/prune: {SCRIPT} maintenance")
@@ -290,7 +311,13 @@ def _check_project():
              if not re.search(rf"^- {field}:[ \t]*\S", section, re.M)]
     if empty:
         return False, "AGENTS.md '## Project' fields empty: " + ", ".join(empty)
-    return True, "AGENTS.md project section filled"
+    try:
+        with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as fh:
+            if SETUP_MARKER in fh.read():
+                return False, f"README.md still contains {SETUP_MARKER} — rewrite it"
+    except OSError:
+        pass
+    return True, "AGENTS.md + README.md filled"
 
 
 def _check_commands():
@@ -323,6 +350,7 @@ SETUP_STEPS = [
 1. Fill '## Project' in AGENTS.md: name, stack, purpose (2-4 lines).
    Remove its {SETUP_MARKER} comment.
 2. Rewrite README.md for actual project (template text = placeholder).
+   Remove its {SETUP_MARKER} comment.
 Infer from codebase first (code, lockfiles, configs, CI); ask user only
 what you can't infer (purpose, planned stack on empty repo).""",
      _check_project),
@@ -635,15 +663,25 @@ def cmd_verify(_args):
 
 
 def tree_state():
-    """Content hash of the tracked working tree, commit-independent and
-    excluding .agents/ (harness state: log/feature updates after a verify run
-    must not mark it stale). A verify stays fresh when the exact tree it
-    checked is committed afterwards."""
+    """Content hash of the working tree (tracked + untracked, ignored files
+    excluded), commit-independent and excluding .agents/ (harness state:
+    log/feature updates after a verify run must not mark it stale). A verify
+    stays fresh when the exact tree it checked is committed afterwards."""
     stash = git("stash", "create")  # tree of HEAD + uncommitted tracked changes
     out = git("ls-tree", (stash or "HEAD") + "^{tree}")
     if not out:
         return None
     lines = [l for l in out.splitlines() if not l.endswith("\t.agents")]
+    untracked = git("ls-files", "--others", "--exclude-standard")
+    for path in sorted(untracked.splitlines()):
+        if path.startswith(".agents/"):
+            continue
+        try:
+            with open(os.path.join(ROOT, path), "rb") as fh:
+                digest = hashlib.sha1(fh.read()).hexdigest()
+        except OSError:
+            digest = "unreadable"
+        lines.append(f"{digest}\t{path}")
     return hashlib.sha1("\n".join(lines).encode("utf-8")).hexdigest()
 
 
@@ -870,6 +908,8 @@ def cmd_feature(args):
         if wip:
             die(f"{wip[0].get('id')} already in_progress (policy: max 1). "
                 f"Finish (feature done {wip[0].get('id')}) or block it first.")
+        if f.get("status") == "done":
+            print(f"WARN: {f['id']} was done — reopening.")
         f["status"] = "in_progress"
     elif args.action == "done":
         if f.get("status") != "in_progress":
@@ -1227,9 +1267,17 @@ def setting(cfg, section):
     return cfg.get("settings", {}).get(section, {})
 
 
+def gh(cmd, *args):
+    try:
+        return subprocess.run(["gh", cmd, *args], cwd=ROOT, text=True,
+                              capture_output=True)
+    except FileNotFoundError:
+        die("gh CLI not found — automate commands are meant to run in "
+            "GitHub Actions, where gh is preinstalled")
+
+
 def gh_json(*args):
-    proc = subprocess.run(["gh", "api", *args], cwd=ROOT, text=True,
-                          capture_output=True)
+    proc = gh("api", *args)
     if proc.returncode != 0:
         print(proc.stderr.strip() or proc.stdout.strip(), file=sys.stderr)
         sys.exit(proc.returncode)
@@ -1237,8 +1285,7 @@ def gh_json(*args):
 
 
 def gh_run(*args):
-    proc = subprocess.run(["gh", *args], cwd=ROOT, text=True,
-                          capture_output=True)
+    proc = gh(*args)
     if proc.stdout.strip():
         print(proc.stdout.strip())
     if proc.stderr.strip():
@@ -1431,8 +1478,8 @@ which command when:
   learned a durable fact {SCRIPT} docs add <category> "<rule>"
   blocked                {SCRIPT} log "<title>" --done "..." --blockers "..."   then ask user
   asked to do upkeep     {SCRIPT} maintenance
-  template automation     {SCRIPT} settings show
-  run automation          {SCRIPT} automate auto-merge-pr --repo org/repo
+  template automation    {SCRIPT} settings show
+  run automation         {SCRIPT} automate auto-merge-pr --repo org/repo
 
 Every command prints a `next:` hint — follow it. State lives in
 .agents/agents.json, owned by this script: manage through these
