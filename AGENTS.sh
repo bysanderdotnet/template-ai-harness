@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Do not read or change this file for normal project work. Use this wrapper's
-# help function instead: ./agents.sh --help
+# help function instead: ./AGENTS.sh --help
 
 set -eu
 
@@ -20,7 +20,7 @@ for candidate in python3 python; do
 done
 
 if [ -z "$PYTHON" ]; then
-  echo "agents.sh: Python 3.8+ is required but no suitable python3/python command was found" >&2
+  echo "AGENTS.sh: Python 3.8+ is required but no suitable python3/python command was found" >&2
   exit 127
 fi
 

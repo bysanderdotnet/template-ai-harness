@@ -2,7 +2,7 @@
 """agents.py — the agent harness. One CLI guides the whole workflow.
 
 Do not read or change this file for normal project work. Use the root wrapper
-help function instead: ./agents.sh --help
+help function instead: ./AGENTS.sh --help
 
 Subcommands (each has --help with details and examples):
 
@@ -34,7 +34,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 
-SCRIPT = "./agents.sh"
+SCRIPT = "./AGENTS.sh"
 
 
 def find_root():
@@ -1010,13 +1010,13 @@ def cmd_maintenance(_args):
     wf = os.path.join(ROOT, ".github", "workflows", "agents.yml")
     try:
         with open(wf, encoding="utf-8") as fh:
-            ci_ok = "agents.sh ci" in fh.read()
+            ci_ok = "AGENTS.sh ci" in fh.read()
     except OSError:
         ci_ok = False
     if ci_ok:
-        item(True, "ci", ".github/workflows/agents.yml runs ./agents.sh ci")
+        item(True, "ci", ".github/workflows/agents.yml runs ./AGENTS.sh ci")
     else:
-        item(False, "ci", ".github/workflows/agents.yml missing or doesn't run ./agents.sh ci")
+        item(False, "ci", ".github/workflows/agents.yml missing or doesn't run ./AGENTS.sh ci")
     item(False, "commands", f"reread {SCRIPT} cmd list — every command still real? "
                             f"definition of done still complete? Then run: {SCRIPT} verify")
 
@@ -1093,7 +1093,7 @@ def cmd_run(args):
 
 def build_parser():
     p = argparse.ArgumentParser(
-        prog="./agents.sh",
+        prog="./AGENTS.sh",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Agent harness — one CLI guides the whole workflow.",
         epilog=f"""\
