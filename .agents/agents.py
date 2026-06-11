@@ -54,6 +54,7 @@ SKILLS_DIR = os.path.join(ROOT, ".agents", "skills")
 
 PROGRESS_DEFAULT_SHOWN = 5   # entries shown by `progress` / referenced by `init`
 RULE_CATEGORIES = ("architecture", "conventions", "testing")
+FEATURE_STATUSES = ("in_progress", "todo", "blocked", "done")
 RULES_SOFT_CAP = 12          # per category; above this, maintenance says combine/prune
 RULE_STALE_DAYS = 90         # rules older than this get flagged for a re-check
 TREE_MAX_DEPTH = 3           # repo map: directories deeper than this are collapsed
@@ -242,6 +243,13 @@ def collect_problems():
         if len(wip) > 1:
             warns.append("%d features in_progress (policy: max 1): %s"
                          % (len(wip), ", ".join(f.get("id", "?") for f in wip)))
+        unknown = [f"{f.get('id', '?')} ('{f.get('status')}')"
+                   for f in cfg.get("features", [])
+                   if f.get("status", "todo") not in FEATURE_STATUSES]
+        if unknown:
+            warns.append("feature(s) with unknown status (hand-edit damage?): "
+                         + ", ".join(unknown)
+                         + f" — repair via {SCRIPT} feature start/done/block")
         for cat in RULE_CATEGORIES:
             n = sum(1 for r in cfg.get("rules", []) if r.get("category") == cat)
             if n > RULES_SOFT_CAP:
@@ -465,7 +473,7 @@ def setup_flow(cfg, mark_step=None, force=False):
 
     if mark_step:
         if mark_step not in names:
-            die(f"init done needs a step name: {', '.join(names)}")
+            die(f"unknown setup step '{mark_step}'. Steps: {', '.join(names)}")
         _, _, _, check = SETUP_STEPS[names.index(mark_step)]
         if check and not force:
             ok, detail = check()
@@ -893,7 +901,7 @@ def cmd_feature(args):
     feats = cfg["features"]
 
     if args.action == "list":
-        by = {"in_progress": [], "todo": [], "blocked": [], "done": []}
+        by = {s: [] for s in FEATURE_STATUSES}
         for f in feats:
             by.setdefault(f.get("status", "todo"), []).append(f)
         for status in ("in_progress", "todo", "blocked"):
@@ -901,6 +909,12 @@ def cmd_feature(args):
                 print(f"{status}:")
                 for f in by[status]:
                     print(f"  {fmt_feature(f)}")
+        for status in by:  # unknown statuses (hand-edit damage) must stay visible
+            if status in FEATURE_STATUSES:
+                continue
+            print(f"{status} (unknown status — repair: feature start/done/block):")
+            for f in by[status]:
+                print(f"  {fmt_feature(f)}")
         if args.all:
             if by["done"]:
                 print("done:")
@@ -953,9 +967,12 @@ def cmd_feature(args):
         if f.get("status") == "done":
             print(f"WARN: {f['id']} was done — reopening.")
         elif f.get("status") == "blocked":
-            print(f"WARN: {f['id']} was blocked ({f.get('notes') or 'no reason recorded'}) — "
-                  f"confirm resolved; note is stale: {SCRIPT} feature note {f['id']} "
-                  "--notes \"...\" or --clear")
+            if f.get("notes"):
+                print(f"WARN: {f['id']} was blocked ({f['notes']}) — confirm resolved; "
+                      f"note is stale: {SCRIPT} feature note {f['id']} "
+                      "--notes \"...\" or --clear")
+            else:
+                print(f"WARN: {f['id']} was blocked (no reason recorded) — confirm resolved.")
         f["status"] = "in_progress"
     elif args.action == "done":
         if f.get("status") != "in_progress":
@@ -1187,7 +1204,7 @@ def cmd_maintenance(_args):
     for r in rules:
         try:
             added = datetime.strptime(r.get("added", ""), "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        except ValueError:
+        except (ValueError, TypeError):  # missing/hand-mangled date: skip, never crash
             continue
         if (now - added).days > RULE_STALE_DAYS:
             stale.append(r.get("id", "?"))
