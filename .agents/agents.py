@@ -149,6 +149,9 @@ def section_error(cfg):
     for key in ("auto_merge_pr", "auto_create_pr"):
         if key in github and not isinstance(github[key], dict):
             return f"'settings.github.{key}' must be a JSON object"
+    setup = cfg.get("setup")
+    if isinstance(setup, dict) and "done" in setup and not isinstance(setup["done"], list):
+        return "'setup.done' must be a JSON array"
     return None
 
 
@@ -347,6 +350,10 @@ def collect_problems():
                 warns.append(f".agents/skills/{name}/ has no SKILL.md")
             elif not skill_description(md):
                 warns.append(f".agents/skills/{name}/SKILL.md missing 'description:' frontmatter")
+
+    if not git("rev-parse", "--is-inside-work-tree"):
+        warns.append("not a git checkout — repo map, verify staleness tracking, "
+                     "and the setup marker scan are degraded")
     return fails, warns
 
 
@@ -401,7 +408,17 @@ def _check_project():
              if not re.search(rf"^- {field}:[ \t]*\S", section, re.M)]
     if empty:
         return False, "AGENTS.md '## Project' fields empty: " + ", ".join(empty)
-    return True, "AGENTS.md project section filled"
+    readme = os.path.join(ROOT, "README.md")
+    if not os.path.isfile(readme):
+        return False, "README.md missing — write one for the actual project"
+    try:
+        with open(readme, encoding="utf-8") as fh:
+            rtext = fh.read()
+    except OSError:
+        return False, "README.md unreadable"
+    if "Template repository for setting up projects with an AI harness" in rtext:
+        return False, "README.md still template text — rewrite for the actual project"
+    return True, "AGENTS.md project section filled, README.md rewritten"
 
 
 def _check_commands():
@@ -827,9 +844,12 @@ def verified_note():
 
 def cmd_log(args):
     cfg = load_config()
+    title = args.title.strip()
+    if not title:
+        die("log needs a non-empty title")
     entry = {
         "date": now_utc(),
-        "title": args.title,
+        "title": title,
         "done": args.done,
         "verified": args.verified or verified_note(),
     }
@@ -969,7 +989,8 @@ def cmd_feature(args):
         return
 
     if args.action == "add":
-        if not args.title:
+        title = (args.title or "").strip()
+        if not title:
             die("feature add needs a title: feature add \"<title>\"")
         fid = args.id
         if fid is None:
@@ -980,7 +1001,7 @@ def cmd_feature(args):
             die("feature id must be letters/digits/dashes/underscores, e.g. F-001")
         if find_feature(feats, fid):
             die(f"feature id '{fid}' already exists")
-        f = {"id": fid, "title": args.title, "status": "todo"}
+        f = {"id": fid, "title": title, "status": "todo"}
         if args.notes:
             f["notes"] = args.notes
         feats.append(f)
@@ -1084,16 +1105,17 @@ def cmd_docs(args):
     if args.action == "add":
         if args.target not in RULE_CATEGORIES:
             die(f"docs add needs a category: {' | '.join(RULE_CATEGORIES)}")
-        if not args.text:
+        text = (args.text or "").strip()
+        if not text:
             die('docs add needs the rule text: docs add <category> "<rule>"')
-        if len(args.text) > 160:
+        if len(text) > 160:
             print("WARN: long rule — caveman style, split or trim.")
         nums = [int(m.group(1)) for r in rules
                 for m in [re.match(r"R-(\d+)$", r.get("id", ""))] if m]
         rule = {
             "id": f"R-{(max(nums) + 1 if nums else 1):03d}",
             "category": args.target,
-            "text": args.text,
+            "text": text,
             "added": now_utc()[:10],
         }
         rules.append(rule)
@@ -1302,11 +1324,11 @@ def render_settings(settings):
     create = settings["auto_create_pr"]
     tags = " ".join(merge.get("notify_tags") or []) or "(none)"
     print("auto-merge-pr:")
-    print(f"  enabled: {merge.get('enabled', False)}")
-    print(f"  notify_on_blocked: {merge.get('notify_on_blocked', False)}")
+    print(f"  enabled: {str(bool(merge.get('enabled'))).lower()}")
+    print(f"  notify_on_blocked: {str(bool(merge.get('notify_on_blocked'))).lower()}")
     print(f"  notify_tags: {tags}")
     print("auto-create-pr:")
-    print(f"  enabled: {create.get('enabled', False)}")
+    print(f"  enabled: {str(bool(create.get('enabled'))).lower()}")
     print(f"  webhook_url: {create.get('webhook_url') or '(empty)'}")
     print(f"  repository: {create.get('repository') or '(empty)'}")
     print(f"  token_env: {create.get('token_env') or '(empty)'}")
@@ -1384,7 +1406,10 @@ def gh_json(*args):
     if proc.returncode != 0:
         print(proc.stderr.strip() or proc.stdout.strip(), file=sys.stderr)
         sys.exit(proc.returncode)
-    return json.loads(proc.stdout or "null")
+    try:
+        return json.loads(proc.stdout or "null")
+    except ValueError as e:
+        die(f"gh api {args[0]} returned non-JSON output: {e}")
 
 
 def gh_run(*args):
@@ -1490,8 +1515,12 @@ def automate_auto_merge_pr(args):
     set_output("auto_merge_enabled", str(bool(cfg_set.get("enabled"))).lower())
 
     if not cfg_set.get("enabled", False):
+        # Still report real open-PR state: auto-create-pr may be enabled on
+        # its own and must not be blocked by a hardcoded "true".
         print("auto-merge-pr disabled")
-        set_output("has_open_prs", "true")
+        remaining = open_prs(args.repo)
+        set_output("has_open_prs", str(bool(remaining)).lower())
+        print(f"open_prs_remaining={len(remaining)}")
         return
 
     prs = open_prs(args.repo)
@@ -1777,6 +1806,10 @@ defaults: both off; blocked-PR messages off; no tags; auto-create URL preset; re
 
 
 def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    if not argv:
+        argv = ["help"]  # bare invocation: show the guide, not a usage error
     args = build_parser().parse_args(argv)
     try:
         args.fn(args)

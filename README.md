@@ -100,7 +100,8 @@ configured. In the workflow, empty values skip the webhook call.
 repo has no CI, it only checks merge conflicts. Failed CI or conflicts can get a
 PR comment with configured agent tags. Pending CI waits for the next run.
 
-`auto-create-pr` runs after `auto-merge-pr`. If PRs remain open, it stops. If no
+`auto-create-pr` runs after `auto-merge-pr` (which reports open-PR state even
+when merging itself is disabled). If PRs remain open, it stops. If no
 PRs remain and `.agents/agents.json` still has open features, it POSTs to the
 configured webhook URL with `{r}` / `{repo}` replaced by the configured
 repository, sending `Authorization: Bearer <token>`. The token is read from the
