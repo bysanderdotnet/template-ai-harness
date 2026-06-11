@@ -2,7 +2,7 @@
 # When the project needs a toolchain before ./AGENTS.sh ci can run the
 # registered commands (e.g. actions/setup-node + npm ci), a human adds
 # those steps below.
-name: verify
+name: agents
 
 on:
   push:
