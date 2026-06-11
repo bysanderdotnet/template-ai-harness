@@ -64,8 +64,8 @@ tells the agent what to do next at every step.
 | `feature list/add/start/done/block/note` | Scope tracking; enforces one feature in progress |
 | `log`, `progress` | Session log: entries auto-stamped with date, commit, and last verify result |
 | `check`, `ci` | Structure validation / the single call CI makes |
-| `automate` | Runs template automations used by GitHub Actions |
-| `settings` | Template automation settings: `auto-merge-pr` and `auto-create-pr` |
+| `github automate` | Runs GitHub automations (`auto-merge-pr`, `auto-create-pr`); only works inside GitHub Actions runners |
+| `github settings` | GitHub automation settings: `auto-merge-pr` and `auto-create-pr` |
 
 Agents never need to know where state lives or hand-edit JSON. Adding a test
 step to a project is `./AGENTS.sh cmd set test "npm test" --verify`, not a
@@ -77,12 +77,16 @@ the manual never drifts from the tool.
 The existing `agents.yml` workflow includes an opt-in automation job that runs only on the 10-minute schedule:
 
 ```sh
-./AGENTS.sh settings show
-./AGENTS.sh settings auto-merge-pr --on
-./AGENTS.sh settings auto-merge-pr --notify-on --tags "@jules @codex"
-./AGENTS.sh settings auto-create-pr --repo "org/repo" --on
-./AGENTS.sh automate auto-merge-pr --repo org/repo
+./AGENTS.sh github settings show
+./AGENTS.sh github settings auto-merge-pr --on
+./AGENTS.sh github settings auto-merge-pr --notify-on --tags "@jules @codex"
+./AGENTS.sh github settings auto-create-pr --repo "org/repo" --on
+./AGENTS.sh github automate auto-merge-pr --repo org/repo
 ```
+
+Settings can be configured from any machine, but `github automate` only works
+inside GitHub Actions runners; every `./AGENTS.sh github ...` invocation prints
+a reminder of this.
 
 Manual `workflow_dispatch` runs still execute the verify job only. Defaults are safe:
 both automations are off, blocked-PR comments are off, tags are empty, and the
@@ -101,7 +105,7 @@ PRs remain and `.agents/agents.json` still has open features, it POSTs to the
 configured webhook URL with `{r}` / `{repo}` replaced by the configured
 repository, sending `Authorization: Bearer <token>`. The token is read from the
 environment variable named by the `token_env` setting (default `AUTO_MERGE_PR`,
-change via `./AGENTS.sh settings auto-create-pr --token-env NAME`); if that
+change via `./AGENTS.sh github settings auto-create-pr --token-env NAME`); if that
 variable is empty the webhook call is skipped.
 
 ## Project docs that don't rot
