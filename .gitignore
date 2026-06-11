@@ -1,30 +1,11 @@
-# Agent-local settings (per-user, never shared)
+# --- AI harness (template-ai-harness) ---
+# Files the harness writes locally at runtime; never commit them.
+# Per-user agent settings (Claude Code):
 .claude/settings.local.json
-
-# Harness scratch state (per-checkout, written by ./AGENTS.sh verify)
+# Transient scratch state, written by ./AGENTS.sh verify:
 .agents/agents.scratch.json
+# Python bytecode cache from running the harness CLI:
+.agents/__pycache__/
 
-# Python/cache noise
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-# Virtual environments and local env files
-.venv/
-venv/
-.env
-.env.*
-
-# Build/output directories common to projects created from this template
-build/
-dist/
-coverage/
-node_modules/
-target/
-
-# OS/editor noise
-.DS_Store
-.idea/
-.vscode/
+# --- Project ---
+# TODO(setup): add stack-specific ignores here (build output, deps, env files, OS/editor noise)

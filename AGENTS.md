@@ -1,54 +1,45 @@
 # Agent Operating Manual
 
-One tool runs the whole workflow:
+One tool runs the whole workflow and prints the next step at every turn:
 
-    ./AGENTS.sh <command>      # --help lists every command
+    ./AGENTS.sh init       # start here (auto-runs at session start); follow its output
+    ./AGENTS.sh --help     # stuck, or unsure which command fits the situation
 
-It guides setup, sessions, scope, verification, progress, project docs — and
-prints the next step at every turn. Trust its output over memory. All state
-lives in `.agents/agents.json`, owned by the CLI — never hand-edit it.
+Trust the script over memory: it walks first-run project setup, scope,
+verification, progress, and session handoff. All state lives in
+`.agents/agents.json`, owned by the CLI — never hand-edit it.
 
 ## Project
 
+<!-- TODO(setup): fill in, then remove this comment -->
 - Name:
 - Stack:
 - Purpose:
 
-## Session lifecycle
-
-1. `./AGENTS.sh init` — auto-runs at session start. Fix FAILs before feature
-   work. Says SETUP MODE → run `./AGENTS.sh setup`, follow the steps.
-2. Pick ONE item: user request or next todo. `./AGENTS.sh feature start <id>`.
-3. Implement. Stay in scope. Task matches a skill (init lists them) → follow
-   the playbook, don't improvise.
-4. `./AGENTS.sh verify` — green = done. Red = not done, say so.
-5. `./AGENTS.sh handoff` — clear every open item before ending the session.
-
 ## Rules
 
 - One feature per session/commit. No drive-by refactors.
-- No green `verify` = status "unverified". Never claim done without it.
-- Project knowledge (architecture, conventions, testing) lives behind
-  `./AGENTS.sh docs`: generated repo map + curated rules. Read before coding.
-  Learned a durable fact → `./AGENTS.sh docs add <category> "<rule>"`.
-- Commands or stack changed → `./AGENTS.sh cmd set ...` + sync the CI
-  toolchain block in `.github/workflows/agents.yml`.
-- Did a recurring multi-step task (deploy, release, migration)? Capture a
-  skill — playbook: `.agents/skills/new-skill/SKILL.md`. Don't wait to be asked.
-- Blocked → `./AGENTS.sh log ... --blockers "..."`, then stop or ask.
-- Asked to do upkeep → `./AGENTS.sh maintenance` lists what to check and prune.
+- Done = `./AGENTS.sh verify` green. Anything else is "unverified" — say so.
+- CI (`.github/workflows/`) is human-owned. Never edit it; tell the user when
+  it needs changes.
 - `AGENTS.sh` / `.agents/agents.py` are harness internals. Usage = `--help`,
-  not reading source.
+  not reading or editing source.
+<!-- TODO(setup): add project no-go zones (e.g. "never edit /migrations"), then remove this comment -->
+
+## Skills
+
+Skills = stored playbooks in `.agents/skills/<name>/SKILL.md`; `init` lists them.
+
+- Task matches a skill → follow the playbook, don't improvise.
+- Just did a recurring multi-step task (deploy, release, migration, codegen)?
+  Capture it as a skill NOW, unprompted — how-to:
+  `.agents/skills/new-skill/SKILL.md`. Next session replays it instead of
+  re-deriving it.
 
 ## Style: caveman
 
-Agent-to-agent text — log entries, feature notes, rules — max terse. Tokens
-cost; filler carries zero information.
+All agent output — chat, commits, code comments, logs, docs — max terse.
+Drop filler; fragments fine: "Tests green. Lint: 2 unused imports." Exact
+paths, commands, numbers; never paraphrase a name. Say once.
 
-- Drop filler ("I have successfully", "in order to"). Fragments fine:
-  "Tests green. Lint: 2 unused imports."
-- Exact paths, commands, numbers. "3 failures", not "several issues". Never
-  paraphrase a name.
-- Say once. Omit what the reader can derive.
-
-Code, comments, commits, user-facing prose: normal clarity. NEVER caveman.
+Only exception: the product itself (website copy, UI strings, end-user docs).

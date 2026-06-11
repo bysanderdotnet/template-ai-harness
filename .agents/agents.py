@@ -6,8 +6,8 @@ help function instead: ./AGENTS.sh --help
 
 Subcommands (each has --help with details and examples):
 
-    setup        guided first-time project setup, one step at a time
-    init         session-start health check + state snapshot (hook/CI run this)
+    init         session start: health check + state snapshot; on a fresh
+                 project it walks guided setup until complete (hook/CI run this)
     verify       run the registered definition of done; records the result
     handoff      end-of-session checklist with live status
     feature      scope: list / add / start / done / block / note
@@ -296,11 +296,11 @@ register them — never edit .agents/agents.py itself:
   {SCRIPT} cmd set test "npm test" --verify        # --verify = definition of done, cheap/fast first
   {SCRIPT} cmd set deps "npm ci" --init            # --init = session-start smoke check
   {SCRIPT} cmd set dev "npm run dev"               # no flag = on-demand helper
-Then fill the toolchain {SETUP_MARKER} block in .github/workflows/agents.yml
-so CI can run them. Don't invent commands that don't exist.
-Repo has no code yet? Delete that CI comment block anyway, add a feature
-"set up toolchain + verify commands" in the scope step, and mark this step:
-  {SCRIPT} setup done commands --force""",
+Don't invent commands that don't exist. CI runs these via ./AGENTS.sh ci;
+if CI needs toolchain steps (e.g. installing node), tell the user — CI is
+human-owned, never edit it yourself.
+Repo has no code yet? Add a feature "set up toolchain + verify commands" in
+the scope step and mark this one: {SCRIPT} init done commands --force""",
      _check_commands),
 
     ("rules", "Record project rules (architecture / conventions / testing)", f"""\
@@ -322,9 +322,7 @@ One entry per feature, smallest shippable units first.""",
     ("guardrails", "Project rules + .gitignore", f"""\
 1. Add project-specific no-go zones to '## Rules' in AGENTS.md
    (e.g. "never edit /migrations"). Remove its {SETUP_MARKER} comment.
-2. Review .gitignore for the stack; replace its {SETUP_MARKER} line.
-Manual step — when finished, mark it:
-  {SCRIPT} setup done guardrails""",
+2. Add stack-specific ignores to .gitignore; replace its {SETUP_MARKER} line.""",
      None),
 ]
 
@@ -354,7 +352,7 @@ def setup_finalize(cfg):
         print("Setup NOT complete:")
         for b in blockers:
             print(f"  BLOCKED: {b}")
-        tip(f"fix the blockers, then rerun: {SCRIPT} setup")
+        tip(f"fix the blockers, then rerun: {SCRIPT} init")
         sys.exit(1)
 
     f000 = find_feature(cfg["features"], "F-000")
@@ -375,35 +373,32 @@ def setup_finalize(cfg):
     save_config(cfg)
     print("== setup COMPLETE (progress entry written, F-000 closed) ==")
     tip("commit everything: git commit -m 'chore: complete project setup'; push if expected")
-    tip(f"then start the first feature: {SCRIPT} feature start <id>")
 
 
-def cmd_setup(args):
-    cfg = load_config()
-    state = setup_pending(cfg)
-    if state is None:
-        print("Setup already complete.")
-        tip(f"{SCRIPT} init")
-        return
+def setup_flow(cfg, mark_step=None, force=False):
+    """Guided setup, driven by init while the project is unconfigured.
+    Exits 1 while steps remain; returns once setup finalizes so init can
+    continue into a normal session."""
+    state = cfg["setup"]
     state.setdefault("done", [])
     names = [n for n, *_ in SETUP_STEPS]
 
-    if args.action == "done":
-        if not args.step or args.step not in names:
-            die(f"setup done needs a step name: {', '.join(names)}")
-        _, _, _, check = SETUP_STEPS[names.index(args.step)]
-        if check and not args.force:
+    if mark_step:
+        if mark_step not in names:
+            die(f"init done needs a step name: {', '.join(names)}")
+        _, _, _, check = SETUP_STEPS[names.index(mark_step)]
+        if check and not force:
             ok, detail = check()
             if not ok:
-                die(f"step '{args.step}' not done: {detail}. Fix it, or override with --force.")
-        if args.step not in state["done"]:
-            state["done"].append(args.step)
+                die(f"step '{mark_step}' not done: {detail}. Fix it, or override with --force.")
+        if mark_step not in state["done"]:
+            state["done"].append(mark_step)
             save_config(cfg)
-        print(f"step '{args.step}' recorded.")
+        print(f"step '{mark_step}' recorded.")
 
     # Status, plus full instructions for the first pending step only —
     # the right information at the right time.
-    print("== setup: guided project configuration ==")
+    print("-- SETUP MODE: project not configured yet; finish setup before feature work --")
     pending = []
     for name, summary, _instr, check in SETUP_STEPS:
         if name in state["done"]:
@@ -429,7 +424,9 @@ def cmd_setup(args):
     print(f"-- current step: {name} — {summary} --")
     print(instructions)
     if check:
-        tip(f"step auto-completes once its check passes — rerun: {SCRIPT} setup")
+        tip(f"step auto-completes once its check passes — rerun: {SCRIPT} init")
+    else:
+        tip(f"manual step — when finished, record it: {SCRIPT} init done {name}")
     sys.exit(1)
 
 
@@ -450,7 +447,7 @@ def render_entry(e, indent="  "):
 
 # ---------- init / verify / check / ci ----------
 
-def cmd_init(_args):
+def cmd_init(args):
     print("== init: session start ==")
     cfg = load_config()
 
@@ -463,13 +460,12 @@ def cmd_init(_args):
     if not fails:
         print("structure OK")
 
+    mark_step = getattr(args, "step", None) if getattr(args, "action", None) == "done" else None
     if setup_pending(cfg) is not None:
-        done = setup_pending(cfg).get("done", [])
-        print("-- SETUP MODE --")
-        print(f"Project not configured yet ({len(done)}/{len(SETUP_STEPS)} steps recorded).")
-        print("Complete guided setup before feature work — it shows status and")
-        print(f"instructions for the current step: {SCRIPT} setup")
-        sys.exit(1)
+        setup_flow(cfg, mark_step=mark_step, force=getattr(args, "force", False))
+        cfg = load_config()  # setup just finalized; continue into a normal session
+    elif getattr(args, "action", None) == "done":
+        print("note: setup already complete — 'init done' only applies during setup.")
 
     print("-- skills (playbooks; follow them when the task matches) --")
     skills = list_skills()
@@ -576,7 +572,7 @@ def cmd_verify(_args):
     print("== verify: definition of done ==")
     cfg = load_config()
     if setup_pending(cfg) is not None:
-        print(f"Project setup incomplete — finish it first: {SCRIPT} setup")
+        print(f"Project setup incomplete — finish it first: {SCRIPT} init")
         sys.exit(1)
     steps = [(n, c) for n, c in cfg["commands"].items() if c.get("verify")]
     if not steps:
@@ -743,7 +739,8 @@ def cmd_handoff(_args):
     print("also consider:")
     print(f"  - learned a durable fact this session → {SCRIPT} docs add <category> \"<rule>\"")
     print("  - repeated a multi-step procedure → capture a skill (.agents/skills/new-skill/SKILL.md)")
-    print(f"  - commands/stack changed → {SCRIPT} cmd set ... + sync CI toolchain (.github/workflows/agents.yml)")
+    print(f"  - build/test commands changed → {SCRIPT} cmd set ...; CI needs toolchain "
+          "changes → tell the user (CI is human-owned, never edit it)")
     if todo:
         print(f"== handoff incomplete: {todo} item(s) open above ==")
     else:
@@ -774,6 +771,10 @@ def cmd_feature(args):
             print(f"done: {len(by['done'])} (use --all to show)")
         if not feats:
             print(f"No features. Add one: {SCRIPT} feature add \"<title>\"")
+        elif by["in_progress"]:
+            tip(f"continue {by['in_progress'][0].get('id')}; when done: {SCRIPT} verify")
+        elif by["todo"]:
+            tip(f"start one: {SCRIPT} feature start <id>")
         return
 
     if args.action == "add":
@@ -792,6 +793,7 @@ def cmd_feature(args):
         feats.append(f)
         save_config(cfg)
         print(f"Added: {fmt_feature(f)}")
+        tip(f"start it when ready: {SCRIPT} feature start {fid}")
         return
 
     # remaining actions operate on an existing id
@@ -822,7 +824,8 @@ def cmd_feature(args):
     save_config(cfg)
     print(f"{f['id']} -> {f['status']}" + (f" ({f['notes']})" if f.get("notes") else ""))
     if args.action == "start":
-        tip(f"implement {f['id']}; stay in scope. Done means: {SCRIPT} verify green")
+        tip(f"implement {f['id']}; stay in scope. When finished: {SCRIPT} verify "
+            f"(must be green), then {SCRIPT} handoff")
     elif args.action == "done":
         nxt = next((x for x in feats if x.get("status") == "todo"), None)
         tip(f"{SCRIPT} handoff — log + commit"
@@ -938,7 +941,7 @@ def cmd_maintenance(_args):
     """Health sweep: suggest what to update, combine, prune, or re-check."""
     cfg = load_config()
     if setup_pending(cfg) is not None:
-        print(f"Project setup incomplete — finish it first: {SCRIPT} setup")
+        print(f"Project setup incomplete — finish it first: {SCRIPT} init")
         sys.exit(1)
 
     print("== maintenance: harness + knowledge health ==")
@@ -1016,7 +1019,8 @@ def cmd_maintenance(_args):
     if ci_ok:
         item(True, "ci", ".github/workflows/agents.yml runs ./AGENTS.sh ci")
     else:
-        item(False, "ci", ".github/workflows/agents.yml missing or doesn't run ./AGENTS.sh ci")
+        item(False, "ci", ".github/workflows/agents.yml missing or doesn't run "
+                          "./AGENTS.sh ci — report to the user; CI is human-owned, don't edit it")
     item(False, "commands", f"reread {SCRIPT} cmd list — every command still real? "
                             f"definition of done still complete? Then run: {SCRIPT} verify")
 
@@ -1076,8 +1080,6 @@ def cmd_cmd(args):
     save_config(cfg)
     flags = "".join(f" [{f}]" for f in ("verify", "init") if entry.get(f))
     print(f"{'Updated' if existed else 'Registered'} {args.name}: {args.command}{flags}")
-    if args.verify or args.init:
-        tip("keep CI able to run this: toolchain block in .github/workflows/agents.yml")
 
 
 def cmd_run(args):
@@ -1097,15 +1099,18 @@ def build_parser():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Agent harness — one CLI guides the whole workflow.",
         epilog=f"""\
-session lifecycle:
-  1. {SCRIPT} init                  health check + state snapshot (auto-run at session start)
-  2. {SCRIPT} feature start <id>    pick ONE item (user request or next todo)
-  3. implement                      stay in scope; follow a skill if one matches
-  4. {SCRIPT} verify                definition of done; green = done, red = not done
-  5. {SCRIPT} handoff               checklist: log entry, close feature, commit, push
+which command when:
+  session start          {SCRIPT} init                 auto-run by hooks; fresh project → it walks guided setup
+  pick work              {SCRIPT} feature start <id>   ONE item at a time (see: feature list)
+  finished implementing  {SCRIPT} verify               green = done, red = not done
+  ending the session     {SCRIPT} handoff              checklist: log, close feature, commit, push
+  learned a durable fact {SCRIPT} docs add <category> "<rule>"
+  blocked                {SCRIPT} log "<title>" --done "..." --blockers "..."   then ask the user
+  asked to do upkeep     {SCRIPT} maintenance
 
-State lives in .agents/agents.json and is owned by this script — manage it
-through these subcommands, never by hand-editing. Each subcommand has --help.""",
+Every command prints a `next:` hint — follow it. State lives in
+.agents/agents.json, owned by this script: manage it through these
+subcommands, never by hand-editing. Each subcommand has --help.""",
     )
     sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
 
@@ -1115,21 +1120,19 @@ through these subcommands, never by hand-editing. Each subcommand has --help."""
         sp.set_defaults(fn=fn)
         return sp
 
-    st = add("setup", cmd_setup,
-             "guided first-time project setup; shows status + instructions for the current step",
-             epilog=f"""\
-examples:
-  {SCRIPT} setup                    status + current step instructions
-  {SCRIPT} setup done guardrails    record a manual step as finished
-Steps with an automatic check complete themselves once the check passes.
-When every step is done, setup runs the final gates and lifts setup mode.""")
-    st.add_argument("action", nargs="?", choices=["status", "done"], default="status")
-    st.add_argument("step", nargs="?", help="step name (for 'done')")
-    st.add_argument("--force", action="store_true",
-                    help="record the step even if its automatic check fails")
-
-    add("init", cmd_init,
-        "session-start health check + state snapshot; suggests what to do next")
+    ini = add("init", cmd_init,
+              "session start: health check + state snapshot; on a fresh project it "
+              "walks guided setup until complete",
+              epilog=f"""\
+First runs: init enters SETUP MODE and guides project configuration one step
+at a time. Steps with an automatic check complete themselves on rerun; manual
+steps are recorded with: {SCRIPT} init done <step>. Rerun init after each
+step; once setup completes, init reports state and the next action.""")
+    ini.add_argument("action", nargs="?", choices=["done"],
+                     help="'done' — record a manual setup step as finished")
+    ini.add_argument("step", nargs="?", help="setup step name (for 'done')")
+    ini.add_argument("--force", action="store_true",
+                     help="record the step even if its automatic check fails")
 
     add("verify", cmd_verify,
         "run the registered definition of done (commands flagged --verify, in order); "
