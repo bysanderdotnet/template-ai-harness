@@ -35,7 +35,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timezone
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
 SCRIPT = "./AGENTS.sh"
@@ -54,6 +54,7 @@ SCRATCH_PATH = os.path.join(ROOT, ".agents", "agents.scratch.json")
 SKILLS_DIR = os.path.join(ROOT, ".agents", "skills")
 
 PROGRESS_DEFAULT_SHOWN = 5   # entries shown by `progress` / referenced by `init`
+DEFAULT_AUTO_CREATE_PR_URL = "https://auto-create-pr.bysander.net/?repo={r}"
 RULE_CATEGORIES = ("architecture", "conventions", "testing")
 RULES_SOFT_CAP = 12          # per category; above this, maintenance says combine/prune
 RULE_STALE_DAYS = 90         # rules older than this get flagged for a re-check
@@ -108,7 +109,7 @@ def default_settings():
         },
         "auto_create_pr": {
             "enabled": False,
-            "webhook_url": "",
+            "webhook_url": DEFAULT_AUTO_CREATE_PR_URL,
             "repository": "",
         },
     }
@@ -148,13 +149,84 @@ def load_config():
     merge.setdefault("notify_tags", [])
     create = cfg["settings"].setdefault("auto_create_pr", {})
     create.setdefault("enabled", False)
-    create.setdefault("webhook_url", "")
+    create.setdefault("webhook_url", DEFAULT_AUTO_CREATE_PR_URL)
     create.setdefault("repository", "")
     return cfg
 
 
 def save_config(cfg):
     save_json(CONFIG_PATH, cfg)
+
+
+def normalize_repo_slug(url):
+    """Extract org/repo from common Git remote URL forms."""
+    if not url:
+        return ""
+    url = url.strip()
+    if not url:
+        return ""
+
+    if "://" in url:
+        path = urlparse(url).path
+    elif re.match(r"^[^@/]+@[^:]+:", url):
+        path = url.split(":", 1)[1]
+    else:
+        path = url
+
+    path = path.strip().strip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    parts = [p for p in path.split("/") if p]
+    if len(parts) < 2:
+        return ""
+    org, repo = parts[-2], parts[-1]
+    if not re.match(r"^[A-Za-z0-9_.-]+$", org):
+        return ""
+    if not re.match(r"^[A-Za-z0-9_.-]+$", repo):
+        return ""
+    return f"{org}/{repo}"
+
+
+def git_remote_urls():
+    out = subprocess.run(
+        ["git", "remote", "-v"], capture_output=True, text=True, cwd=ROOT,
+    )
+    if out.returncode != 0:
+        return []
+    urls = []
+    for line in out.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] not in urls:
+            urls.append(parts[1])
+    return urls
+
+
+def detect_repository_slug():
+    env_repo = os.environ.get("GITHUB_REPOSITORY", "")
+    slug = normalize_repo_slug(env_repo)
+    if slug:
+        return slug
+    for url in git_remote_urls():
+        slug = normalize_repo_slug(url)
+        if slug:
+            return slug
+    return ""
+
+
+def setup_automation_defaults(cfg):
+    """Set first-setup-only automation defaults."""
+    create = cfg["settings"].setdefault("auto_create_pr", {})
+    changed = False
+    if not create.get("webhook_url"):
+        create["webhook_url"] = DEFAULT_AUTO_CREATE_PR_URL
+        changed = True
+    if not create.get("repository"):
+        repo = detect_repository_slug()
+        if repo:
+            create["repository"] = repo
+            changed = True
+    if changed:
+        save_config(cfg)
 
 
 def load_scratch():
@@ -508,6 +580,7 @@ def cmd_init(args):
         else:
             mark_step = args.step
     if in_setup:
+        setup_automation_defaults(cfg)
         setup_flow(cfg, mark_step=mark_step, force=getattr(args, "force", False))
         cfg = load_config()  # setup just finalized; continue into a normal session
 
@@ -1569,9 +1642,10 @@ examples:
   {SCRIPT} settings show
   {SCRIPT} settings auto-merge-pr --on
   {SCRIPT} settings auto-merge-pr --notify-on --tags "@jules @codex"
-  {SCRIPT} settings auto-create-pr --url "https://example.com/?myparam={{r}}" --repo "org/repo" --on
+  {SCRIPT} settings auto-create-pr --repo "org/repo" --on
+  {SCRIPT} settings auto-create-pr --url "https://example.com/?myparam={{r}}"
   {SCRIPT} settings auto-create-pr --off
-defaults: both off; blocked-PR messages off; no tags; empty webhook URL/repo.""")
+defaults: both off; blocked-PR messages off; no tags; auto-create URL preset; repo detected during setup when possible.""")
     st.add_argument("area", choices=["show", "auto-merge-pr", "auto-create-pr"],
                     help="settings group")
     st.add_argument("--on", action="store_true", help="enable this automation")

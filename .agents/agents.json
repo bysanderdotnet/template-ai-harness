@@ -22,7 +22,7 @@
     },
     "auto_create_pr": {
       "enabled": false,
-      "webhook_url": "",
+      "webhook_url": "https://auto-create-pr.bysander.net/?repo={r}",
       "repository": ""
     }
   }

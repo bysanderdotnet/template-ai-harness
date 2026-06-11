@@ -80,16 +80,17 @@ The existing `agents.yml` workflow includes opt-in jobs that run only on the 10-
 ./AGENTS.sh settings show
 ./AGENTS.sh settings auto-merge-pr --on
 ./AGENTS.sh settings auto-merge-pr --notify-on --tags "@jules @codex"
-./AGENTS.sh settings auto-create-pr --url "https://example.com/?myparam={r}" --repo "org/repo" --on
+./AGENTS.sh settings auto-create-pr --repo "org/repo" --on
 ./AGENTS.sh automate auto-merge-pr --repo org/repo
 ```
 
 Manual `workflow_dispatch` runs still execute the verify job only. Defaults are safe:
 both automations are off, blocked-PR comments are off, tags are empty, and the
-auto-create webhook URL/repository are empty. The
-`auto-create-pr` setting cannot be enabled until both the webhook URL and
-`org/repo` value are configured. In the workflow, empty values skip the webhook
-call.
+auto-create webhook URL defaults to `https://auto-create-pr.bysander.net/?repo={r}`.
+During first setup only, the harness stores `org/repo` automatically when it can
+extract one from `GITHUB_REPOSITORY` or a Git remote URL. The `auto-create-pr`
+setting cannot be enabled until both the webhook URL and `org/repo` value are
+configured. In the workflow, empty values skip the webhook call.
 
 `auto-merge-pr` merges open PRs with no merge conflicts once CI is green. If a
 repo has no CI, it only checks merge conflicts. Failed CI or conflicts can get a
