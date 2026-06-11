@@ -18,6 +18,7 @@ Subcommands (details + examples: ./AGENTS.sh help <command>):
     run          run one registered command by name
     check        structure/state validation only
     ci           what CI runs: check, then init + verify once setup complete
+    settings     configure template automations (auto-merge-pr, auto-create-pr)
 
 Stdlib only; Python 3.8+. Durable state: .agents/agents.json; scratch:
 .agents/agents.scratch.json (gitignored). Both owned by this script — never
@@ -94,6 +95,31 @@ def tip(msg):
 
 # ---------- state (single file: agents.json; scratch: agents.scratch.json) ----------
 
+def default_settings():
+    return {
+        "auto_merge_pr": {
+            "enabled": False,
+            "notify_on_blocked": False,
+            "notify_tags": [],
+        },
+        "auto_create_pr": {
+            "enabled": False,
+            "webhook_url": "",
+            "repository": "",
+        },
+    }
+
+
+def setting_enabled(on, off, current):
+    if on and off:
+        die("choose --on or --off, not both")
+    if on:
+        return True
+    if off:
+        return False
+    return current
+
+
 def load_config():
     """All durable harness state. Top-level keys are independent sections so
     future harness versions can add more without migrations."""
@@ -109,8 +135,17 @@ def load_config():
         die(".agents/agents.json is not a JSON object. "
             "Restore from git history — never hand-edit.")
     for key, default in (("commands", {}), ("features", []),
-                         ("progress", []), ("rules", [])):
+                         ("progress", []), ("rules", []),
+                         ("settings", default_settings())):
         cfg.setdefault(key, default)
+    merge = cfg["settings"].setdefault("auto_merge_pr", {})
+    merge.setdefault("enabled", False)
+    merge.setdefault("notify_on_blocked", False)
+    merge.setdefault("notify_tags", [])
+    create = cfg["settings"].setdefault("auto_create_pr", {})
+    create.setdefault("enabled", False)
+    create.setdefault("webhook_url", "")
+    create.setdefault("repository", "")
     return cfg
 
 
@@ -1120,6 +1155,60 @@ def cmd_run(args):
     sys.exit(subprocess.run(c["run"], shell=True, cwd=ROOT).returncode)
 
 
+def render_settings(settings):
+    merge = settings["auto_merge_pr"]
+    create = settings["auto_create_pr"]
+    tags = " ".join(merge.get("notify_tags") or []) or "(none)"
+    print("auto-merge-pr:")
+    print(f"  enabled: {merge.get('enabled', False)}")
+    print(f"  notify_on_blocked: {merge.get('notify_on_blocked', False)}")
+    print(f"  notify_tags: {tags}")
+    print("auto-create-pr:")
+    print(f"  enabled: {create.get('enabled', False)}")
+    print(f"  webhook_url: {create.get('webhook_url') or '(empty)'}")
+    print(f"  repository: {create.get('repository') or '(empty)'}")
+
+
+def cmd_settings(args):
+    cfg = load_config()
+    settings = cfg["settings"]
+
+    if args.area == "show":
+        render_settings(settings)
+        return
+
+    if args.area == "auto-merge-pr":
+        merge = settings["auto_merge_pr"]
+        merge["enabled"] = setting_enabled(args.on, args.off, merge.get("enabled", False))
+        if args.notify_on and args.notify_off:
+            die("choose --notify-on or --notify-off, not both")
+        if args.notify_on:
+            merge["notify_on_blocked"] = True
+        if args.notify_off:
+            merge["notify_on_blocked"] = False
+        if args.tags is not None:
+            merge["notify_tags"] = [t for t in args.tags.split() if t]
+        save_config(cfg)
+        render_settings(settings)
+        return
+
+    if args.area == "auto-create-pr":
+        create = settings["auto_create_pr"]
+        enabled = setting_enabled(args.on, args.off, create.get("enabled", False))
+        webhook_url = args.url if args.url is not None else create.get("webhook_url", "")
+        repository = args.repo if args.repo is not None else create.get("repository", "")
+        if enabled and (not webhook_url or not repository):
+            die("auto-create-pr needs --url and --repo before --on")
+        create["enabled"] = enabled
+        create["webhook_url"] = webhook_url
+        create["repository"] = repository
+        save_config(cfg)
+        render_settings(settings)
+        return
+
+    die("unknown settings area")
+
+
 # ---------- argument parsing ----------
 
 def build_parser():
@@ -1136,6 +1225,7 @@ which command when:
   learned a durable fact {SCRIPT} docs add <category> "<rule>"
   blocked                {SCRIPT} log "<title>" --done "..." --blockers "..."   then ask user
   asked to do upkeep     {SCRIPT} maintenance
+  template automation     {SCRIPT} settings show
 
 Every command prints a `next:` hint — follow it. State lives in
 .agents/agents.json, owned by this script: manage through these
@@ -1252,6 +1342,28 @@ re-running set on an existing name keeps its flags/desc; clear with cmd rm.""")
 
     add("check", cmd_check, "structure/state validation only (no setup gate)")
     add("ci", cmd_ci, "what CI runs: check, then init + verify once setup complete")
+
+    st = add("settings", cmd_settings,
+             "configure template automations: auto-merge-pr and auto-create-pr",
+             epilog=f"""\
+examples:
+  {SCRIPT} settings show
+  {SCRIPT} settings auto-merge-pr --on
+  {SCRIPT} settings auto-merge-pr --notify-on --tags "@jules @codex"
+  {SCRIPT} settings auto-create-pr --url "https://example.com/?myparam={{r}}" --repo "org/repo" --on
+  {SCRIPT} settings auto-create-pr --off
+defaults: both off; blocked-PR messages off; no tags; empty webhook URL/repo.""")
+    st.add_argument("area", choices=["show", "auto-merge-pr", "auto-create-pr"],
+                    help="settings group")
+    st.add_argument("--on", action="store_true", help="enable this automation")
+    st.add_argument("--off", action="store_true", help="disable this automation")
+    st.add_argument("--notify-on", action="store_true",
+                    help="auto-merge-pr: comment on failed CI/conflicts")
+    st.add_argument("--notify-off", action="store_true",
+                    help="auto-merge-pr: do not comment on failed CI/conflicts")
+    st.add_argument("--tags", help="auto-merge-pr: space-separated tags for comments")
+    st.add_argument("--url", help="auto-create-pr: webhook URL; use {r} for org/repo")
+    st.add_argument("--repo", help="auto-create-pr: org/repo passed to webhook")
 
     hp = add("help", lambda a: p.parse_args(([a.topic] if a.topic else []) + ["--help"]),
              "show usage; `help <command>` for one command's details")
