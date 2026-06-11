@@ -20,4 +20,4 @@ jobs:
 
       - name: Harness gates
         # check always; init + verify once guided setup is complete.
-        run: ./agents.sh ci
+        run: ./AGENTS.sh ci
