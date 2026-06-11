@@ -1,29 +1,27 @@
 #!/usr/bin/env python3
-"""agents.py — the agent harness. One CLI guides the whole workflow.
+"""agents.py — agent harness. One CLI guides whole workflow.
 
-Do not read or change this file for normal project work. Use the root wrapper
-help function instead: ./AGENTS.sh --help
+Don't read or change this file for project work. Usage: ./AGENTS.sh help
 
-Subcommands (each has --help with details and examples):
+Subcommands (details + examples: ./AGENTS.sh help <command>):
 
-    init         session start: health check + state snapshot; on a fresh
-                 project it walks guided setup until complete (hook/CI run this)
-    verify       run the registered definition of done; records the result
-    handoff      end-of-session checklist with live status
+    init         session start: health check + state snapshot; fresh project →
+                 guided setup until complete (hook/CI run this)
+    verify       run registered definition of done; records result
+    handoff      end-of-session checklist, live status
     feature      scope: list / add / start / done / block / note
-    log          record a progress entry (auto-stamps date, commit, verify result)
+    log          record progress entry (auto-stamps date, commit, verify result)
     progress     show recent progress entries (display bounded, never compact by hand)
     docs         live project docs: generated repo map + curated rules
-    maintenance  health sweep: what to update, combine, prune, re-check
+    maintenance  health sweep: update, combine, prune, re-check
     cmd          register project commands: set / rm / list
     run          run one registered command by name
     check        structure/state validation only
-    ci           what CI runs: check, then init + verify once setup is complete
+    ci           what CI runs: check, then init + verify once setup complete
 
-Standard library only; Python 3.8+. All durable state lives in
-.agents/agents.json; transient scratch in .agents/agents.scratch.json
-(gitignored). Both are owned by this script — never hand-edited. Register
-new build/test/lint commands with `cmd set` instead of editing this file.
+Stdlib only; Python 3.8+. Durable state: .agents/agents.json; scratch:
+.agents/agents.scratch.json (gitignored). Both owned by this script — never
+hand-edit. New build/test/lint commands → `cmd set`, not edits here.
 """
 
 import argparse
@@ -108,8 +106,8 @@ def load_config():
     try:
         cfg = load_json(CONFIG_PATH, default=None)
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        die(f".agents/agents.json is not valid JSON: {e}. "
-            "Restore it from git history — never hand-edit it.")
+        die(f".agents/agents.json not valid JSON: {e}. "
+            "Restore from git history — never hand-edit.")
     if cfg is None:
         cfg = {}
     for key, default in (("commands", {}), ("features", []),
@@ -284,43 +282,42 @@ SETUP_STEPS = [
     ("project", "Project identity (AGENTS.md + README.md)", f"""\
 1. Fill '## Project' in AGENTS.md: name, stack, purpose (2-4 lines).
    Remove its {SETUP_MARKER} comment.
-2. Rewrite README.md for the actual project (template text is placeholder).
-Infer from the codebase first (code, lockfiles, configs, CI); ask the user
-only what you cannot infer (purpose, planned stack on an empty repo).""",
+2. Rewrite README.md for actual project (template text = placeholder).
+Infer from codebase first (code, lockfiles, configs, CI); ask user only
+what you can't infer (purpose, planned stack on empty repo).""",
      _check_project),
 
     ("commands", "Register project commands", f"""\
-Find the real commands (package.json scripts, Makefile, pyproject, CI) and
-register them — never edit .agents/agents.py itself:
+Find real commands (package.json scripts, Makefile, pyproject, CI) and
+register — never edit .agents/agents.py itself:
   {SCRIPT} cmd set lint "npm run lint" --verify
   {SCRIPT} cmd set test "npm test" --verify        # --verify = definition of done, cheap/fast first
   {SCRIPT} cmd set deps "npm ci" --init            # --init = session-start smoke check
   {SCRIPT} cmd set dev "npm run dev"               # no flag = on-demand helper
-Don't invent commands that don't exist. CI runs these via ./AGENTS.sh ci;
-if CI needs toolchain steps (e.g. installing node), tell the user — CI is
-human-owned, never edit it yourself.
-Repo has no code yet? Add a feature "set up toolchain + verify commands" in
-the scope step and mark this one: {SCRIPT} init done commands --force""",
+Don't invent commands. CI runs these via {SCRIPT} ci; CI needs toolchain
+steps (e.g. node install) → tell user — CI human-owned, never edit.
+No code yet? Add feature "set up toolchain + verify commands" in scope
+step, mark this one: {SCRIPT} init done commands --force""",
      _check_commands),
 
     ("rules", "Record project rules (architecture / conventions / testing)", f"""\
-Record what an agent must know — one terse rule per call:
+Record what agent must know — one terse rule per call:
   {SCRIPT} docs add architecture "<modules, data flow, key dirs>"
   {SCRIPT} docs add conventions "<naming, style, commit format>"
   {SCRIPT} docs add testing "<how to run tests, expectations>"
-Infer from the codebase. Nothing to record yet (e.g. no tests)? Record that
-fact as the rule. At least one rule per category. The repo map is generated
-live by `{SCRIPT} docs` — no need to describe the file tree.""",
+Infer from codebase. Nothing to record yet (e.g. no tests)? Record that
+fact as the rule. Min one rule per category. Repo map generated live by
+`{SCRIPT} docs` — don't describe the file tree.""",
      _check_rules),
 
     ("scope", "Seed the feature list", f"""\
-Agree initial features with the user, then:
+Agree initial features with user, then:
   {SCRIPT} feature add "<title>" [--notes "..."]
 One entry per feature, smallest shippable units first.""",
      _check_scope),
 
     ("guardrails", "Project rules + .gitignore", f"""\
-1. Add project-specific no-go zones to '## Rules' in AGENTS.md
+1. Add project no-go zones to '## Rules' in AGENTS.md
    (e.g. "never edit /migrations"). Remove its {SETUP_MARKER} comment.
 2. Add stack-specific ignores to .gitignore; replace its {SETUP_MARKER} line.""",
      None),
@@ -347,12 +344,12 @@ def setup_finalize(cfg):
         blockers.append(f"{SETUP_MARKER} still in: {', '.join(leftover)}")
     steps = [(n, c) for n, c in cfg["commands"].items() if c.get("verify")]
     if steps and not run_verify_steps(steps):
-        blockers.append("verify is red — fix before completing setup")
+        blockers.append("verify red — fix before completing setup")
     if blockers:
         print("Setup NOT complete:")
         for b in blockers:
             print(f"  BLOCKED: {b}")
-        tip(f"fix the blockers, then rerun: {SCRIPT} init")
+        tip(f"fix blockers, rerun: {SCRIPT} init")
         sys.exit(1)
 
     f000 = find_feature(cfg["features"], "F-000")
@@ -390,7 +387,7 @@ def setup_flow(cfg, mark_step=None, force=False):
         if check and not force:
             ok, detail = check()
             if not ok:
-                die(f"step '{mark_step}' not done: {detail}. Fix it, or override with --force.")
+                die(f"step '{mark_step}' not done: {detail}. Fix, or override with --force.")
         if mark_step not in state["done"]:
             state["done"].append(mark_step)
             save_config(cfg)
@@ -424,9 +421,9 @@ def setup_flow(cfg, mark_step=None, force=False):
     print(f"-- current step: {name} — {summary} --")
     print(instructions)
     if check:
-        tip(f"step auto-completes once its check passes — rerun: {SCRIPT} init")
+        tip(f"step auto-completes once check passes — rerun: {SCRIPT} init")
     else:
-        tip(f"manual step — when finished, record it: {SCRIPT} init done {name}")
+        tip(f"manual step — when finished, record: {SCRIPT} init done {name}")
     sys.exit(1)
 
 
@@ -467,7 +464,7 @@ def cmd_init(args):
     elif getattr(args, "action", None) == "done":
         print("note: setup already complete — 'init done' only applies during setup.")
 
-    print("-- skills (playbooks; follow them when the task matches) --")
+    print("-- skills (playbooks; follow when task matches) --")
     skills = list_skills()
     for name, desc in skills:
         print(f"  {name}: {desc}")
@@ -528,7 +525,7 @@ def cmd_init(args):
     else:
         print(f"  none. Register with: {SCRIPT} cmd set <name> \"<cmd>\" [--verify] [--init]")
     if not any(c.get("verify") for c in cmds.values()):
-        print("WARN: no --verify commands registered: `verify` has nothing to run.")
+        print("WARN: no --verify commands registered — `verify` has nothing to run.")
 
     init_cmds = [(n, c) for n, c in cmds.items() if c.get("init")]
     if init_cmds:
@@ -541,17 +538,17 @@ def cmd_init(args):
                 print(f"FAIL: init check '{name}' exited {rc}")
 
     if fails:
-        print("== init FAILED: fix the FAILs above before feature work. ==")
+        print("== init FAILED: fix FAILs above before feature work. ==")
         sys.exit(1)
     print("== init OK ==")
     if open_blocker:
-        tip(f"resolve or re-confirm the open blocker first: {open_blocker}")
+        tip(f"resolve or re-confirm open blocker first: {open_blocker}")
     if wip:
         tip(f"continue {wip[0].get('id')}; when done: {SCRIPT} verify, then {SCRIPT} handoff")
     elif nxt:
         tip(f"pick ONE item: user request, or {SCRIPT} feature start {nxt.get('id')}")
     else:
-        tip(f"no open scope — agree next features with the user: {SCRIPT} feature add \"<title>\"")
+        tip(f"no open scope — agree next features with user: {SCRIPT} feature add \"<title>\"")
 
 
 def run_verify_steps(steps):
@@ -562,7 +559,7 @@ def run_verify_steps(steps):
         rc = subprocess.run(c["run"], shell=True, cwd=ROOT).returncode
         if rc != 0:
             failed = f"{name} (exit {rc})"
-            print(f"FAIL: step '{name}' exited {rc}; aborting remaining steps.")
+            print(f"FAIL: step '{name}' exited {rc}; remaining steps skipped.")
             break
     record_verify("fail" if failed else "pass", failed=failed)
     return failed is None
@@ -572,19 +569,19 @@ def cmd_verify(_args):
     print("== verify: definition of done ==")
     cfg = load_config()
     if setup_pending(cfg) is not None:
-        print(f"Project setup incomplete — finish it first: {SCRIPT} init")
+        print(f"Project setup incomplete — finish first: {SCRIPT} init")
         sys.exit(1)
     steps = [(n, c) for n, c in cfg["commands"].items() if c.get("verify")]
     if not steps:
         print("No verify commands registered — nothing gates completion.")
-        print("Register them (cheap/fast first), e.g.:")
+        print("Register (cheap/fast first), e.g.:")
         print(f'  {SCRIPT} cmd set lint "npm run lint" --verify')
         print(f'  {SCRIPT} cmd set test "npm test" --verify')
         record_verify("fail", failed="(no verify commands registered)")
         sys.exit(1)
     if run_verify_steps(steps):
         print(f"== verify OK: all {len(steps)} step(s) green ==")
-        tip(f"{SCRIPT} handoff — log the work, close the feature, commit")
+        tip(f"{SCRIPT} handoff — log work, close feature, commit")
     else:
         print("== verify FAILED. Not done — fix and rerun. ==")
         sys.exit(1)
@@ -700,7 +697,7 @@ def cmd_handoff(_args):
         item(False, "verify", f"last run FAILED at {lv.get('failed_step')} — fix and rerun, "
                               "or hand off explicitly as unverified/broken in the log")
     elif lv.get("head") != head:
-        item(False, "verify", f"last pass is from a different commit — rerun: {SCRIPT} verify")
+        item(False, "verify", f"last pass from a different commit — rerun: {SCRIPT} verify")
     else:
         item(True, "verify", f"pass ({lv.get('date')})")
 
@@ -711,7 +708,7 @@ def cmd_handoff(_args):
         item(True, "log", f"entry recorded today: \"{latest.get('title')}\"")
     else:
         item(False, "log", f"no entry for this session — run: {SCRIPT} log \"<title>\" "
-                           "--done \"...\" --next \"...\" (caveman style; cover what shipped, "
+                           "--done \"...\" --next \"...\" (caveman style; cover shipped, "
                            "known issues, next step, blockers)")
 
     wip = [f for f in cfg["features"] if f.get("status") == "in_progress"]
@@ -737,10 +734,10 @@ def cmd_handoff(_args):
         item(True, "push", "no upstream configured (skip)")
 
     print("also consider:")
-    print(f"  - learned a durable fact this session → {SCRIPT} docs add <category> \"<rule>\"")
+    print(f"  - learned a durable fact → {SCRIPT} docs add <category> \"<rule>\"")
     print("  - repeated a multi-step procedure → capture a skill (.agents/skills/new-skill/SKILL.md)")
     print(f"  - build/test commands changed → {SCRIPT} cmd set ...; CI needs toolchain "
-          "changes → tell the user (CI is human-owned, never edit it)")
+          "changes → tell user (CI human-owned, never edit)")
     if todo:
         print(f"== handoff incomplete: {todo} item(s) open above ==")
     else:
@@ -807,7 +804,7 @@ def cmd_feature(args):
         wip = [x for x in feats if x.get("status") == "in_progress" and x is not f]
         if wip:
             die(f"{wip[0].get('id')} already in_progress (policy: max 1). "
-                f"Finish it (feature done {wip[0].get('id')}) or block it first.")
+                f"Finish (feature done {wip[0].get('id')}) or block it first.")
         f["status"] = "in_progress"
     elif args.action == "done":
         f["status"] = "done"
@@ -890,7 +887,7 @@ def cmd_docs(args):
         if not args.text:
             die('docs add needs the rule text: docs add <category> "<rule>"')
         if len(args.text) > 160:
-            print("WARN: long rule — caveman style, split or trim if possible.")
+            print("WARN: long rule — caveman style, split or trim.")
         nums = [int(m.group(1)) for r in rules
                 for m in [re.match(r"R-(\d+)$", r.get("id", ""))] if m]
         rule = {
@@ -941,7 +938,7 @@ def cmd_maintenance(_args):
     """Health sweep: suggest what to update, combine, prune, or re-check."""
     cfg = load_config()
     if setup_pending(cfg) is not None:
-        print(f"Project setup incomplete — finish it first: {SCRIPT} init")
+        print(f"Project setup incomplete — finish first: {SCRIPT} init")
         sys.exit(1)
 
     print("== maintenance: harness + knowledge health ==")
@@ -983,8 +980,8 @@ def cmd_maintenance(_args):
             stale.append(r.get("id", "?"))
     if stale:
         item(False, "stale rules", f"{len(stale)} older than {RULE_STALE_DAYS} days "
-                                   f"({', '.join(stale)}) — spot-check against the code; "
-                                   "still true → rm + re-add to refresh the date; drifted → fix or rm")
+                                   f"({', '.join(stale)}) — spot-check against code; "
+                                   "still true → rm + re-add (refreshes date); drifted → fix or rm")
     else:
         item(True, "stale rules", f"none older than {RULE_STALE_DAYS} days")
 
@@ -1020,7 +1017,7 @@ def cmd_maintenance(_args):
         item(True, "ci", ".github/workflows/agents.yml runs ./AGENTS.sh ci")
     else:
         item(False, "ci", ".github/workflows/agents.yml missing or doesn't run "
-                          "./AGENTS.sh ci — report to the user; CI is human-owned, don't edit it")
+                          "./AGENTS.sh ci — report to user; CI human-owned, don't edit")
     item(False, "commands", f"reread {SCRIPT} cmd list — every command still real? "
                             f"definition of done still complete? Then run: {SCRIPT} verify")
 
@@ -1030,7 +1027,7 @@ def cmd_maintenance(_args):
     print("  - .gitignore still matches the stack?")
 
     print(f"== maintenance: {flagged} item(s) to act on above ==")
-    tip(f"fix small items now; bigger ones → {SCRIPT} feature add \"maintenance: <what>\"")
+    tip(f"fix small items now; bigger → {SCRIPT} feature add \"maintenance: <what>\"")
     if fails:
         sys.exit(1)
 
@@ -1100,17 +1097,17 @@ def build_parser():
         description="Agent harness — one CLI guides the whole workflow.",
         epilog=f"""\
 which command when:
-  session start          {SCRIPT} init                 auto-run by hooks; fresh project → it walks guided setup
+  session start          {SCRIPT} init                 auto-run by hooks; fresh project → guided setup
   pick work              {SCRIPT} feature start <id>   ONE item at a time (see: feature list)
   finished implementing  {SCRIPT} verify               green = done, red = not done
   ending the session     {SCRIPT} handoff              checklist: log, close feature, commit, push
   learned a durable fact {SCRIPT} docs add <category> "<rule>"
-  blocked                {SCRIPT} log "<title>" --done "..." --blockers "..."   then ask the user
+  blocked                {SCRIPT} log "<title>" --done "..." --blockers "..."   then ask user
   asked to do upkeep     {SCRIPT} maintenance
 
 Every command prints a `next:` hint — follow it. State lives in
-.agents/agents.json, owned by this script: manage it through these
-subcommands, never by hand-editing. Each subcommand has --help.""",
+.agents/agents.json, owned by this script: manage through these
+subcommands, never hand-edit. Details per command: {SCRIPT} help <command>.""",
     )
     sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
 
@@ -1124,10 +1121,10 @@ subcommands, never by hand-editing. Each subcommand has --help.""",
               "session start: health check + state snapshot; on a fresh project it "
               "walks guided setup until complete",
               epilog=f"""\
-First runs: init enters SETUP MODE and guides project configuration one step
-at a time. Steps with an automatic check complete themselves on rerun; manual
-steps are recorded with: {SCRIPT} init done <step>. Rerun init after each
-step; once setup completes, init reports state and the next action.""")
+First runs: init enters SETUP MODE, guides configuration one step at a time.
+Steps with an automatic check complete themselves on rerun; manual steps are
+recorded with: {SCRIPT} init done <step>. Rerun init after each step; once
+setup completes, init reports state and the next action.""")
     ini.add_argument("action", nargs="?", choices=["done"],
                      help="'done' — record a manual setup step as finished")
     ini.add_argument("step", nargs="?", help="setup step name (for 'done')")
@@ -1147,8 +1144,8 @@ step; once setup completes, init reports state and the next action.""")
 example:
   {SCRIPT} log "auth feature" --done "JWT login in src/auth/" \\
       --issues "refresh tokens untested" --next "wire logout" --feature F-002
-Terse caveman style (AGENTS.md '## Style'). Storage and history are handled
-for you; nothing to compact or archive.""")
+Terse caveman style (AGENTS.md '## Style'). Storage/history handled for you;
+nothing to compact or archive.""")
     lg.add_argument("title", help="short entry title")
     lg.add_argument("--done", required=True, help="what shipped (paths, behavior)")
     lg.add_argument("--issues", help="broken/known issues: facts, exact errors")
@@ -1186,9 +1183,9 @@ examples:
   {SCRIPT} docs                                     repo map + all rules
   {SCRIPT} docs add conventions "commits: imperative, <=72 chars"
   {SCRIPT} docs rm R-003
-The repo map is generated from git ls-files, so it never drifts. Rules are
-the curated part: one terse fact each, added when learned, pruned when stale
-(`{SCRIPT} maintenance` flags categories that grow past {RULES_SOFT_CAP}).""")
+Repo map generated from git ls-files — never drifts. Rules are the curated
+part: one terse fact each, added when learned, pruned when stale
+(`{SCRIPT} maintenance` flags categories past {RULES_SOFT_CAP}).""")
     dc.add_argument("action", nargs="?", choices=["show", "add", "rm"], default="show")
     dc.add_argument("target", nargs="?",
                     help="category (for add: %s) or rule id (for rm)"
@@ -1221,7 +1218,11 @@ verify steps run in listed order — register cheap/fast checks first.""")
     rn.add_argument("name")
 
     add("check", cmd_check, "structure/state validation only (no setup gate)")
-    add("ci", cmd_ci, "what CI runs: check, then init + verify once setup is complete")
+    add("ci", cmd_ci, "what CI runs: check, then init + verify once setup complete")
+
+    hp = add("help", lambda a: p.parse_args(([a.topic] if a.topic else []) + ["--help"]),
+             "show usage; `help <command>` for one command's details")
+    hp.add_argument("topic", nargs="?", help="command name, e.g. feature")
     return p
 
 

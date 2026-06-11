@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
-# Do not read or change this file for normal project work. Use this wrapper's
-# help function instead: ./AGENTS.sh --help
+# Don't read or change this file for normal project work. Use this wrapper's
+# help command instead: ./AGENTS.sh help
 
 set -eu
 

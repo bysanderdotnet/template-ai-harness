@@ -4,7 +4,7 @@ Harness implementation and state live here. Humans and agents normally should
 not inspect or edit this directory directly; use the root wrapper instead:
 
 ```sh
-./AGENTS.sh --help
+./AGENTS.sh help
 ```
 
 | Path | What | Lifecycle |
@@ -22,7 +22,7 @@ definition of done, `docs` shows a
 generated repo map plus curated rules (architecture / conventions / testing),
 `maintenance` flags what to combine, prune, or re-check, and `handoff` checks
 the session is safely closeable. Subcommand details live in
-`./AGENTS.sh --help`, nowhere else.
+`./AGENTS.sh help`, nowhere else.
 
 `AGENTS.md` (repo root) is the single manual; per-agent entrypoints map to it:
 `CLAUDE.md` and `GEMINI.md` are symlinks, Codex reads `AGENTS.md` natively,
@@ -34,7 +34,7 @@ same gates, enforced remotely.
 
 Design principles:
 
-- Instructions: short AGENTS.md; details in `./AGENTS.sh --help`, loaded on demand.
+- Instructions: short AGENTS.md; details in `./AGENTS.sh help`, loaded on demand.
 - State: one JSON file behind a CLI → sessions resume, never cold-start, and
   agents can't corrupt state by hand-editing.
 - Docs: the repo map is generated (never drifts); only rules are curated, and
