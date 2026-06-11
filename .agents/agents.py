@@ -125,6 +125,25 @@ def setting_enabled(on, off, current):
     return current
 
 
+def section_error(cfg):
+    """Wrong-typed sections (hand-edit damage); None when the shape is sane."""
+    for key, typ in (("setup", dict), ("commands", dict), ("features", list),
+                     ("progress", list), ("rules", list), ("settings", dict)):
+        if key in cfg and not isinstance(cfg[key], typ):
+            kind = "object" if typ is dict else "array"
+            return f"'{key}' must be a JSON {kind}"
+    for key in ("features", "progress", "rules"):
+        if any(not isinstance(x, dict) for x in cfg.get(key, []) or []):
+            return f"'{key}' entries must be JSON objects"
+    if any(not isinstance(v, dict) for v in (cfg.get("commands") or {}).values()):
+        return "'commands' entries must be JSON objects"
+    settings = cfg.get("settings") or {}
+    for key in ("auto_merge_pr", "auto_create_pr"):
+        if key in settings and not isinstance(settings[key], dict):
+            return f"'settings.{key}' must be a JSON object"
+    return None
+
+
 def load_config():
     """All durable harness state. Top-level keys are independent sections so
     future harness versions can add more without migrations."""
@@ -138,6 +157,10 @@ def load_config():
             "Restore from git history — never hand-edit.")
     if not isinstance(cfg, dict):
         die(".agents/agents.json is not a JSON object. "
+            "Restore from git history — never hand-edit.")
+    err = section_error(cfg)
+    if err:
+        die(f".agents/agents.json invalid: {err}. "
             "Restore from git history — never hand-edit.")
     for key, default in (("commands", {}), ("features", []),
                          ("progress", []), ("rules", []),
@@ -159,7 +182,8 @@ def save_config(cfg):
 
 
 def normalize_repo_slug(url):
-    """Extract org/repo from common Git remote URL forms."""
+    """Extract org/repo from hosted Git remote URL forms. Bare filesystem
+    paths (e.g. a local clone source) are not repository slugs."""
     if not url:
         return ""
     url = url.strip()
@@ -168,10 +192,10 @@ def normalize_repo_slug(url):
 
     if "://" in url:
         path = urlparse(url).path
-    elif re.match(r"^[^@/]+@[^:]+:", url):
+    elif re.match(r"^[^@/]+@[^:/]+:", url):
         path = url.split(":", 1)[1]
     else:
-        path = url
+        return ""
 
     path = path.strip().strip("/")
     if path.endswith(".git"):
@@ -202,10 +226,9 @@ def git_remote_urls():
 
 
 def detect_repository_slug():
-    env_repo = os.environ.get("GITHUB_REPOSITORY", "")
-    slug = normalize_repo_slug(env_repo)
-    if slug:
-        return slug
+    env_repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
+    if re.match(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", env_repo):
+        return env_repo
     for url in git_remote_urls():
         slug = normalize_repo_slug(url)
         if slug:
@@ -214,7 +237,8 @@ def detect_repository_slug():
 
 
 def setup_automation_defaults(cfg):
-    """Set first-setup-only automation defaults."""
+    """Set first-setup-only automation defaults. Runs when setup finalizes —
+    not on every init — so an unconfigured template checkout stays pristine."""
     create = cfg["settings"].setdefault("auto_create_pr", {})
     changed = False
     if not create.get("webhook_url"):
@@ -287,6 +311,10 @@ def collect_problems():
             cfg = load_json(CONFIG_PATH)
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             fails.append(f".agents/agents.json is not valid JSON: {e}")
+    if isinstance(cfg, dict) and section_error(cfg):
+        fails.append(f".agents/agents.json invalid: {section_error(cfg)} — "
+                     "restore from git history, never hand-edit")
+        cfg = None
     if isinstance(cfg, dict):
         wip = [f for f in cfg.get("features", []) if f.get("status") == "in_progress"]
         if len(wip) > 1:
@@ -464,6 +492,7 @@ def setup_finalize(cfg):
         tip(f"fix blockers, rerun: {SCRIPT} init")
         sys.exit(1)
 
+    setup_automation_defaults(cfg)
     f000 = find_feature(cfg["features"], "F-000")
     if f000:
         f000["status"] = "done"
@@ -580,7 +609,6 @@ def cmd_init(args):
         else:
             mark_step = args.step
     if in_setup:
-        setup_automation_defaults(cfg)
         setup_flow(cfg, mark_step=mark_step, force=getattr(args, "force", False))
         cfg = load_config()  # setup just finalized; continue into a normal session
 
@@ -708,14 +736,33 @@ def cmd_verify(_args):
 
 
 def tree_state():
-    """Content hash of the tracked working tree, commit-independent and
-    excluding .agents/ (harness state: log/feature updates after a verify run
-    must not mark it stale). A verify stays fresh when the exact tree it
-    checked is committed afterwards."""
-    stash = git("stash", "create")  # tree of HEAD + uncommitted tracked changes
-    out = git("ls-tree", (stash or "HEAD") + "^{tree}")
-    if not out:
+    """Content hash of the working tree (tracked + untracked non-ignored
+    files), commit-independent and excluding .agents/ (harness state:
+    log/feature updates after a verify run must not mark it stale). A verify
+    stays fresh when the exact tree it checked is committed afterwards.
+    Built via a throwaway index so new files count — `git stash create`
+    would miss untracked files and mark fresh verifies stale on commit."""
+    git_dir = git("rev-parse", "--absolute-git-dir")
+    if not git_dir:
         return None
+    idx = os.path.join(git_dir, "agents-tree-state.index")
+    env = dict(os.environ, GIT_INDEX_FILE=idx)
+    try:
+        add = subprocess.run(["git", "add", "-A", "."], capture_output=True,
+                             text=True, cwd=ROOT, env=env)
+        if add.returncode != 0:
+            return None
+        wt = subprocess.run(["git", "write-tree"], capture_output=True,
+                            text=True, cwd=ROOT, env=env)
+        if wt.returncode != 0:
+            return None
+        tree = wt.stdout.strip()
+    finally:
+        try:
+            os.remove(idx)
+        except OSError:
+            pass
+    out = git("ls-tree", tree)
     lines = [l for l in out.splitlines() if not l.endswith("\t.agents")]
     return hashlib.sha1("\n".join(lines).encode("utf-8")).hexdigest()
 
@@ -943,6 +990,8 @@ def cmd_feature(args):
         if wip:
             die(f"{wip[0].get('id')} already in_progress (policy: max 1). "
                 f"Finish (feature done {wip[0].get('id')}) or block it first.")
+        if f.get("status") == "done":
+            print(f"WARN: {f['id']} was done — reopening.")
         f["status"] = "in_progress"
     elif args.action == "done":
         if f.get("status") != "in_progress":
@@ -1300,9 +1349,17 @@ def setting(cfg, section):
     return cfg.get("settings", {}).get(section, {})
 
 
+def gh_proc(args):
+    try:
+        return subprocess.run(["gh", *args], cwd=ROOT, text=True,
+                              capture_output=True)
+    except FileNotFoundError:
+        die("gh CLI not found — automations need GitHub CLI "
+            "(preinstalled on GitHub Actions runners)")
+
+
 def gh_json(*args):
-    proc = subprocess.run(["gh", "api", *args], cwd=ROOT, text=True,
-                          capture_output=True)
+    proc = gh_proc(["api", *args])
     if proc.returncode != 0:
         print(proc.stderr.strip() or proc.stdout.strip(), file=sys.stderr)
         sys.exit(proc.returncode)
@@ -1310,8 +1367,7 @@ def gh_json(*args):
 
 
 def gh_run(*args):
-    proc = subprocess.run(["gh", *args], cwd=ROOT, text=True,
-                          capture_output=True)
+    proc = gh_proc(list(args))
     if proc.stdout.strip():
         print(proc.stdout.strip())
     if proc.stderr.strip():
@@ -1327,7 +1383,8 @@ def set_output(name, value):
 
 
 def open_prs(repo):
-    return gh_json(f"repos/{repo}/pulls", "-f", "state=open", "-f", "per_page=100")
+    # query params in the URL: `gh api -f` would switch the request to POST
+    return gh_json(f"repos/{repo}/pulls?state=open&per_page=100")
 
 
 def pr_details(repo, number):
@@ -1342,7 +1399,7 @@ def pr_details(repo, number):
 
 def ci_state(repo, sha):
     status = gh_json(f"repos/{repo}/commits/{sha}/status")
-    check_runs = gh_json(f"repos/{repo}/commits/{sha}/check-runs", "-f", "per_page=100")
+    check_runs = gh_json(f"repos/{repo}/commits/{sha}/check-runs?per_page=100")
     statuses = status.get("statuses") or []
     checks = check_runs.get("check_runs") or []
     failures = []
@@ -1380,7 +1437,7 @@ def comment_body(reason, tags):
 
 
 def ensure_comment(repo, number, body):
-    comments = gh_json(f"repos/{repo}/issues/{number}/comments", "-f", "per_page=100")
+    comments = gh_json(f"repos/{repo}/issues/{number}/comments?per_page=100")
     for comment in comments:
         if AUTO_MERGE_MARKER in (comment.get("body") or ""):
             if comment.get("body") == body:
@@ -1458,8 +1515,11 @@ def call_webhook(url, repo):
     encoded = quote(repo, safe="")
     final_url = url.replace("{r}", encoded).replace("{repo}", encoded)
     req = Request(final_url, headers={"User-Agent": "template-ai-harness"})
-    with urlopen(req, timeout=30) as resp:
-        print(f"webhook_status={resp.status}")
+    try:
+        with urlopen(req, timeout=30) as resp:
+            print(f"webhook_status={resp.status}")
+    except OSError as e:  # URLError/HTTPError/socket errors
+        die(f"webhook call failed ({final_url}): {e}")
 
 
 def automate_auto_create_pr(args):
@@ -1504,8 +1564,8 @@ which command when:
   learned a durable fact {SCRIPT} docs add <category> "<rule>"
   blocked                {SCRIPT} log "<title>" --done "..." --blockers "..."   then ask user
   asked to do upkeep     {SCRIPT} maintenance
-  template automation     {SCRIPT} settings show
-  run automation          {SCRIPT} automate auto-merge-pr --repo org/repo
+  template automation    {SCRIPT} settings show
+  run automation         {SCRIPT} automate auto-merge-pr --repo org/repo
 
 Every command prints a `next:` hint — follow it. State lives in
 .agents/agents.json, owned by this script: manage through these
