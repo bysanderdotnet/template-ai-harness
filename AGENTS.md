@@ -2,7 +2,7 @@
 
 One tool runs the whole workflow, prints next step every turn:
 
-    ./AGENTS.sh init       # start here (auto-runs at session start); follow output
+    ./AGENTS.sh init       # start here; follow output
     ./AGENTS.sh help       # stuck, or unsure which command fits
 
 Trust script over memory: walks setup, scope, verification, progress,
