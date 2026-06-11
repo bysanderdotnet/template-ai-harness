@@ -13,11 +13,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
-  issues: write
-  checks: read
-  statuses: read
+  contents: read
 
 # Superseded verify runs on the same branch/PR are wasted minutes; cancel them.
 concurrency:
@@ -37,8 +33,14 @@ jobs:
         run: ./AGENTS.sh ci
 
   auto-merge-pr:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      checks: read
+      statuses: read
     outputs:
       has_open_prs: ${{ steps.merge.outputs.has_open_prs }}
     steps:
@@ -51,8 +53,10 @@ jobs:
         run: ./AGENTS.sh automate auto-merge-pr --repo "${{ github.repository }}"
 
   auto-create-pr:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: auto-merge-pr
     steps:
       - uses: actions/checkout@v4

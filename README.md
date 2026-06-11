@@ -74,7 +74,7 @@ the manual never drifts from the tool.
 
 ## Optional PR automation
 
-The existing `agents.yml` workflow includes opt-in jobs that run every 10 minutes:
+The existing `agents.yml` workflow includes opt-in jobs that run only on the 10-minute schedule:
 
 ```sh
 ./AGENTS.sh settings show
@@ -84,8 +84,9 @@ The existing `agents.yml` workflow includes opt-in jobs that run every 10 minute
 ./AGENTS.sh automate auto-merge-pr --repo org/repo
 ```
 
-Defaults are safe: both automations are off, blocked-PR comments are off, tags
-are empty, and the auto-create webhook URL/repository are empty. The
+Manual `workflow_dispatch` runs still execute the verify job only. Defaults are safe:
+both automations are off, blocked-PR comments are off, tags are empty, and the
+auto-create webhook URL/repository are empty. The
 `auto-create-pr` setting cannot be enabled until both the webhook URL and
 `org/repo` value are configured. In the workflow, empty values skip the webhook
 call.
